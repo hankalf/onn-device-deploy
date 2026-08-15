@@ -82,9 +82,17 @@ player *and* launcher-capable — one app, no launcher chaining, no accessibilit
 service:
 
 ```bash
-# APK from https://www.fully-kiosk.com/ (not in the TV Play Store)
+# APK from https://www.fully-kiosk.com/ (see the warning below)
 ./onn-kiosk.sh <ip> --apk fully-kiosk.apk --pkg de.ozerov.fully --set-home
 ```
+
+> **Install the APK from fully-kiosk.com, NOT the Play Store version.** Play
+> policy forbids apps from replacing the home app, so the Play build ships with
+> the launcher capability stripped — `--set-home` then has nothing to point at
+> and boot keeps landing on the Google TV home. A `versionName` ending in
+> `-play` (`adb shell dumpsys package de.ozerov.fully | grep versionName`) is
+> the tell; the script now flags it for you. Fix: `adb uninstall
+> de.ozerov.fully`, then install the downloaded APK.
 
 Then set its **Start URL**. Rather than typing a long URL with a remote, turn on
 **Settings -> Remote Administration** on the TV and paste it from your PC at

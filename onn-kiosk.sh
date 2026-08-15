@@ -348,6 +348,20 @@ if [ "$SET_HOME" = 1 ]; then
     fi
   else
     echo "== $TARGET is NOT launcher-capable — cannot be set as home."
+    # Play Store builds of Fully Kiosk have the launcher capability stripped
+    # out (Play policy forbids replacing the home app), and the version string
+    # is the only visible tell.
+    TVER=$(qshell dumpsys package "$TARGET" | grep -m1 versionName | sed 's/.*=//')
+    case "$TVER" in
+      *-play*)
+        echo "   Installed version is '$TVER' — a PLAY STORE build."
+        echo "   Play policy strips the launcher capability from it. Install"
+        echo "   the direct-download build instead:"
+        echo "     adb uninstall $TARGET"
+        echo "     # download the APK from the vendor's own site, then"
+        echo "     $0 <ip> --apk <that.apk> --pkg $PKG --set-home"
+        echo ;;
+    esac
     echo "   Launcher-capable apps on this device:"
     home_capable | sed 's/^/     /'
     echo
