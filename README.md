@@ -71,19 +71,31 @@ right name.
 
 ## If the player can't be the launcher
 
-`--set-home` only works on apps that declare a launcher activity, and many
-signage players don't. The script detects this and says so. Your options,
-best first:
+Most signage players — AbleSign included — declare no launcher activity, so
+they can never own boot themselves. `--set-home` detects this and says so.
+The reliable fix is to hand boot to a real launcher and let *it* start the
+player:
 
-1. **The player's own start-on-boot** — enable it in the player's settings or
-   web dashboard. The "display over other apps" permission it needs is granted
-   by this script, which is the usual missing piece.
-2. **Projectivy Launcher** (free, in the TV Play Store) — launcher-capable and
-   has an "app to launch on startup" option. Install it, `--set-home` it (or
-   let `--kill-launcher` hand boot to it), and point its startup app at your
-   player.
-3. **Fully Kiosk Browser** as the player — it is launcher-capable itself, so
-   `--set-home` works directly.
+```bash
+# 1. install Projectivy Launcher (free) — opens its Store page on the TV
+./onn-kiosk.sh <ip> --store com.spocky.projengmenu
+#    ...install it with the remote, and WAIT for it to finish...
+
+# 2. hand boot to Projectivy, keeping the player as the permissions target
+./onn-kiosk.sh <ip> --pkg tv.ablesign.app \
+                    --home-pkg com.spocky.projengmenu --set-home
+
+# 3. on the TV, once: Projectivy settings -> launch at startup -> AbleSign
+```
+
+The script verifies what the system actually resolves as home afterwards, and
+tells you to add `--kill-launcher` if the Google TV home is somehow still
+winning.
+
+Other options: enable the player's own start-on-boot (the overlay permission
+it needs is granted by this script, which is usually the missing piece), or
+use **Fully Kiosk Browser** as the player — it is launcher-capable, so
+`--set-home` works on it directly.
 
 ## Notes
 

@@ -24,9 +24,15 @@
 #                    (install it with the remote, then re-run the script).
 #   --pkg <pkg>      Signage player package name. Strongly recommended —
 #                    auto-detection is a fallback, not a guarantee.
-#   --set-home       Make the signage player the launcher, if it is
-#                    launcher-capable (the script checks and says so if not).
-#                    Undo: --restore-home.
+#   --home-pkg <pkg> Which app should own boot, when that is NOT the signage
+#                    player (the usual case — most signage players declare no
+#                    launcher activity). Point this at a real launcher such as
+#                    Projectivy (com.spocky.projengmenu) and set that launcher's
+#                    own "launch at startup" to your player.
+#   --set-home       Make --home-pkg (or the signage player) the launcher, if it
+#                    is launcher-capable — the script checks, sets it, and then
+#                    verifies what the system actually resolves. Undo:
+#                    --restore-home.
 #   --restore-home   Put the Google TV launcher back.
 #   --debloat        Remove streaming apps for the current user (reversible).
 #   --minimal        Deeper strip on top of --debloat: assistant/search,
@@ -56,7 +62,7 @@ if [ -z "$IP" ] || [[ "$IP" == --* ]]; then
 fi
 shift
 
-APK="" STORE_PKG="" PKG="" SET_HOME=0 RESTORE_HOME=0 DEBLOAT=0 MINIMAL=0
+APK="" STORE_PKG="" PKG="" HOME_PKG="" SET_HOME=0 RESTORE_HOME=0 DEBLOAT=0 MINIMAL=0
 KILL_LAUNCHER=0 RESTORE_LAUNCHER=0 REBLOAT=0 REBOOT=1 DRY=0 LIST=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -64,6 +70,7 @@ while [ $# -gt 0 ]; do
     --apk) APK="$2"; shift 2 ;;
     --store) STORE_PKG="$2"; shift 2 ;;
     --pkg) PKG="$2"; shift 2 ;;
+    --home-pkg) HOME_PKG="$2"; shift 2 ;;
     --set-home) SET_HOME=1; shift ;;
     --restore-home) RESTORE_HOME=1; shift ;;
     --debloat) DEBLOAT=1; shift ;;
@@ -277,27 +284,43 @@ shell settings put secure screensaver_enabled 0
 shell settings put global stay_on_while_plugged_in 3
 
 if [ "$SET_HOME" = 1 ]; then
-  # set-home-activity only works on apps that declare a HOME activity. Resolve
-  # the exact component and say so plainly when the app has none.
-  HOME_COMP=$(home_capable | grep "^$PKG/" | head -1 || true)
+  # Which app should own boot: --home-pkg when given, else the signage player.
+  # Signage players often declare no HOME activity, which is what --home-pkg
+  # exists for: hand boot to a real launcher (Projectivy) and let it start the
+  # player.
+  TARGET="${HOME_PKG:-$PKG}"
+  HOME_COMP=$(home_capable | grep "^$TARGET/" | head -1 || true)
   if [ -n "$HOME_COMP" ]; then
     echo "== Making $HOME_COMP the launcher (Home + every boot land in it)"
     shell cmd package set-home-activity "$HOME_COMP"
+    if [ "$DRY" = 0 ]; then
+      sleep 1
+      NOW=$(qshell cmd package resolve-activity --brief -a android.intent.action.MAIN \
+              -c android.intent.category.HOME | tail -1)
+      echo "   home is now: $NOW"
+      case "$NOW" in
+        "$TARGET"/*) ;;
+        *) echo "   WARNING: the system still resolves home elsewhere. Try"
+           echo "   adding --kill-launcher to disable the Google TV home." ;;
+      esac
+    fi
   else
-    echo "== $PKG is NOT launcher-capable — cannot be set as home."
+    echo "== $TARGET is NOT launcher-capable — cannot be set as home."
     echo "   Launcher-capable apps on this device:"
     home_capable | sed 's/^/     /'
     echo
     echo "   Your options, best first:"
-    echo "   1. Enable the player's own start-on-boot setting (in its app"
-    echo "      settings or web dashboard). The overlay permission it needs"
-    echo "      was just granted, so it may simply work now."
-    echo "   2. Install Projectivy Launcher (free, in the TV Play Store),"
-    echo "      re-run with --pkg for your player plus --set-home-projectivy"
-    echo "      style flow: set Projectivy as home, then in its settings pick"
-    echo "      'App to launch on startup' -> your player."
+    echo "   1. Install Projectivy Launcher (free, in the TV Play Store):"
+    echo "        $0 <ip> --store com.spocky.projengmenu"
+    echo "      then hand boot to it and let it start your player:"
+    echo "        $0 <ip> --pkg $PKG --home-pkg com.spocky.projengmenu --set-home"
+    echo "      finally, on the TV: Projectivy settings -> launch at startup"
+    echo "      -> your player."
+    echo "   2. Enable the player's own start-on-boot setting (app settings or"
+    echo "      its web dashboard). The overlay permission it needs was just"
+    echo "      granted, so it may work now."
     echo "   3. Use Fully Kiosk Browser as the player instead - it IS"
-    echo "      launcher-capable, so --set-home works directly."
+    echo "      launcher-capable, so --set-home works on it directly."
   fi
 fi
 
@@ -308,8 +331,12 @@ fi
 
 if [ "$KILL_LAUNCHER" = 1 ]; then
   # Refuse to remove the only working home — that's a black screen at boot.
-  OTHER_HOME=$(home_capable | grep -v "^$GTV_LAUNCHER/" \
-    | grep -viE 'settings|setupwraith|frameworkpackagestubs' | head -1 || true)
+  if [ -n "$HOME_PKG" ]; then
+    OTHER_HOME=$(home_capable | grep "^$HOME_PKG/" | head -1 || true)
+  else
+    OTHER_HOME=$(home_capable | grep -v "^$GTV_LAUNCHER/" \
+      | grep -viE 'settings|setupwraith|frameworkpackagestubs' | head -1 || true)
+  fi
   if [ -z "$OTHER_HOME" ] && [ "$DRY" = 0 ]; then
     echo "== NOT disabling the Google TV home: no other launcher-capable app"
     echo "   exists to take over boot. Install one first (e.g. Projectivy"
@@ -318,6 +345,8 @@ if [ "$KILL_LAUNCHER" = 1 ]; then
     echo "== Disabling the Google TV home (Live/Apps rows included)"
     echo "   Boot will land in: ${OTHER_HOME:-<dry-run>}"
     shell pm disable-user --user 0 "$GTV_LAUNCHER"
+    # Don't leave the boot target to fallback ordering — name it explicitly.
+    [ -n "$OTHER_HOME" ] && shell cmd package set-home-activity "$OTHER_HOME"
   fi
 fi
 
