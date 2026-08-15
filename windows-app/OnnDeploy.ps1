@@ -1,8 +1,9 @@
-# OnnDeploy — one-click wall-display provisioning for Android TV / Google TV boxes.
+# OnnDeploy — makes an onn / Google TV box launch AbleSign on every reboot.
 #
 # Point it at a box, press Deploy, and it: installs its own copy of adb, finds
-# the device over USB or the network, removes every streaming app, installs the
-# signage player, makes the box boot straight into it, and verifies the result.
+# the device over USB or the network, removes every streaming app, and sets the
+# box to come up in AbleSign after any reboot or power cut. AbleSign pulls its
+# own content from your AbleSign cloud account, so there is no URL to enter.
 # Errors are diagnosed and repaired automatically where that is possible, and
 # reported in plain language where it is not.
 #
@@ -10,6 +11,7 @@
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName Microsoft.VisualBasic
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $ErrorActionPreference = 'Stop'
@@ -74,35 +76,30 @@ $btnConnect.Text = 'Connect'; $btnConnect.Location = New-Object Drawing.Point(22
 $btnConnect.Size = New-Object Drawing.Size(90, 26)
 $form.Controls.Add($btnConnect)
 
-$null = New-Label '2. What the screen should show' 20 155 300 $true
-$null = New-Label 'Dashboard URL (from Admin > Screen Fleet > Copy URL):' 20 178 420 $false
-$txtUrl = New-Object Windows.Forms.TextBox
-$txtUrl.Location = New-Object Drawing.Point(20, 199); $txtUrl.Size = New-Object Drawing.Size(580, 24)
-$form.Controls.Add($txtUrl)
-
-$null = New-Label '3. Player' 20 236 200 $true
+$null = New-Label '2. Player' 20 155 200 $true
+$null = New-Label 'AbleSign gets its content from your AbleSign cloud account - nothing to enter here.' 20 178 620 $false
 $rbAble = New-Object Windows.Forms.RadioButton
 $rbAble.Text = 'AbleSign  (free - recommended; auto-boots via Projectivy)'
-$rbAble.Location = New-Object Drawing.Point(20, 258); $rbAble.Size = New-Object Drawing.Size(390, 22)
+$rbAble.Location = New-Object Drawing.Point(20, 202); $rbAble.Size = New-Object Drawing.Size(390, 22)
 $rbAble.Checked = $true
 $form.Controls.Add($rbAble)
 $rbFully = New-Object Windows.Forms.RadioButton
 $rbFully.Text = 'Fully Kiosk  (kiosk/launcher mode needs a paid PLUS license)'
-$rbFully.Location = New-Object Drawing.Point(20, 280); $rbFully.Size = New-Object Drawing.Size(400, 22)
+$rbFully.Location = New-Object Drawing.Point(20, 224); $rbFully.Size = New-Object Drawing.Size(400, 22)
 $form.Controls.Add($rbFully)
 
 $chkWipe = New-Object Windows.Forms.CheckBox
 $chkWipe.Text = 'Remove all streaming apps'; $chkWipe.Checked = $true
-$chkWipe.Location = New-Object Drawing.Point(420, 258); $chkWipe.Size = New-Object Drawing.Size(220, 22)
+$chkWipe.Location = New-Object Drawing.Point(440, 202); $chkWipe.Size = New-Object Drawing.Size(220, 22)
 $form.Controls.Add($chkWipe)
 $chkExcl = New-Object Windows.Forms.CheckBox
 $chkExcl.Text = 'Disable the Google TV home screen'; $chkExcl.Checked = $true
-$chkExcl.Location = New-Object Drawing.Point(420, 280); $chkExcl.Size = New-Object Drawing.Size(260, 22)
+$chkExcl.Location = New-Object Drawing.Point(440, 224); $chkExcl.Size = New-Object Drawing.Size(260, 22)
 $form.Controls.Add($chkExcl)
 
 $btnGo = New-Object Windows.Forms.Button
 $btnGo.Text = 'DEPLOY'
-$btnGo.Location = New-Object Drawing.Point(20, 313); $btnGo.Size = New-Object Drawing.Size(200, 40)
+$btnGo.Location = New-Object Drawing.Point(20, 280); $btnGo.Size = New-Object Drawing.Size(200, 40)
 $btnGo.Font = New-Object Drawing.Font('Segoe UI', 11, [Drawing.FontStyle]::Bold)
 $btnGo.BackColor = [Drawing.Color]::FromArgb(29, 78, 216); $btnGo.ForeColor = 'White'
 $btnGo.FlatStyle = 'Flat'
@@ -110,42 +107,42 @@ $form.Controls.Add($btnGo)
 
 $btnUndo = New-Object Windows.Forms.Button
 $btnUndo.Text = 'Undo (back to stock)'
-$btnUndo.Location = New-Object Drawing.Point(232, 313); $btnUndo.Size = New-Object Drawing.Size(160, 40)
+$btnUndo.Location = New-Object Drawing.Point(232, 280); $btnUndo.Size = New-Object Drawing.Size(160, 40)
 $form.Controls.Add($btnUndo)
 
 $btnCheck = New-Object Windows.Forms.Button
 $btnCheck.Text = 'Check only'
-$btnCheck.Location = New-Object Drawing.Point(404, 313); $btnCheck.Size = New-Object Drawing.Size(110, 40)
+$btnCheck.Location = New-Object Drawing.Point(404, 280); $btnCheck.Size = New-Object Drawing.Size(110, 40)
 $form.Controls.Add($btnCheck)
 
 $btnReq = New-Object Windows.Forms.Button
 $btnReq.Text = 'Requirements'
-$btnReq.Location = New-Object Drawing.Point(526, 313); $btnReq.Size = New-Object Drawing.Size(120, 40)
+$btnReq.Location = New-Object Drawing.Point(526, 280); $btnReq.Size = New-Object Drawing.Size(120, 40)
 $form.Controls.Add($btnReq)
 
 # Utility row - the smaller tools built up over this project
 $btnShot = New-Object Windows.Forms.Button
-$btnShot.Text = 'Screenshot'; $btnShot.Location = New-Object Drawing.Point(20, 359)
+$btnShot.Text = 'Screenshot'; $btnShot.Location = New-Object Drawing.Point(20, 326)
 $btnShot.Size = New-Object Drawing.Size(95, 26); $form.Controls.Add($btnShot)
 $btnApk = New-Object Windows.Forms.Button
-$btnApk.Text = 'Install APK...'; $btnApk.Location = New-Object Drawing.Point(121, 359)
+$btnApk.Text = 'Install APK...'; $btnApk.Location = New-Object Drawing.Point(121, 326)
 $btnApk.Size = New-Object Drawing.Size(100, 26); $form.Controls.Add($btnApk)
 $btnReboot = New-Object Windows.Forms.Button
-$btnReboot.Text = 'Reboot box'; $btnReboot.Location = New-Object Drawing.Point(227, 359)
+$btnReboot.Text = 'Reboot box'; $btnReboot.Location = New-Object Drawing.Point(227, 326)
 $btnReboot.Size = New-Object Drawing.Size(95, 26); $form.Controls.Add($btnReboot)
 $btnPlayAble = New-Object Windows.Forms.Button
 $btnPlayAble.Text = 'Open AbleSign install page on TV'
-$btnPlayAble.Location = New-Object Drawing.Point(328, 359)
+$btnPlayAble.Location = New-Object Drawing.Point(328, 326)
 $btnPlayAble.Size = New-Object Drawing.Size(210, 26); $form.Controls.Add($btnPlayAble)
 
 $chkOwner = New-Object Windows.Forms.CheckBox
 $chkOwner.Text = 'Try device-owner (fresh box, NO Google account) - Fully Kiosk only'
-$chkOwner.Location = New-Object Drawing.Point(420, 236); $chkOwner.Size = New-Object Drawing.Size(420, 22)
+$chkOwner.Location = New-Object Drawing.Point(20, 248); $chkOwner.Size = New-Object Drawing.Size(460, 22)
 $form.Controls.Add($chkOwner)
 
 $log = New-Object Windows.Forms.RichTextBox
-$log.Location = New-Object Drawing.Point(20, 394)
-$log.Size = New-Object Drawing.Size(800, 208)
+$log.Location = New-Object Drawing.Point(20, 362)
+$log.Size = New-Object Drawing.Size(800, 240)
 $log.ReadOnly = $true; $log.BackColor = [Drawing.Color]::FromArgb(24,24,27)
 $log.ForeColor = [Drawing.Color]::Gainsboro
 $log.Font = New-Object Drawing.Font('Consolas', 9)
@@ -166,6 +163,10 @@ function Info($t) { Say "   $t" }
 
 # --------------------------------------------------------- requirements gate -
 $script:ReqText = @'
+GOAL: this box comes up in AbleSign after every reboot and power cut,
+with nobody touching a remote. AbleSign shows whatever screen your
+AbleSign cloud account assigns it - there is no URL to enter here.
+
 BEFORE YOU DEPLOY - one-time steps on the box. On a FRESH / RESET box do
 them in this order:
 
@@ -558,11 +559,6 @@ function Do-Deploy {
     if (-not (Repair-Connection)) { return }
     Repair-Home
 
-    $url = $txtUrl.Text.Trim()
-    if (-not $url) {
-      Warn 'No dashboard URL given - the player will come up blank.'
-    }
-
     if ($chkWipe.Checked) { Remove-Bloat }
 
     if ($rbFully.Checked) {
@@ -582,7 +578,10 @@ function Do-Deploy {
         }
       }
       if (-not (Set-BootTarget $Fully)) { return }
-      Set-StartUrl $url
+      $u = [Microsoft.VisualBasic.Interaction]::InputBox(
+        'Fully Kiosk needs a page to show. Paste the URL (leave blank to set it on the TV later).',
+        'Start URL', '')
+      if ($u) { Set-StartUrl $u }
     } else {
       # AbleSign declares no launcher activity, so it cannot own boot itself.
       # Projectivy can, and starts a chosen app at boot via its accessibility
@@ -714,8 +713,9 @@ $btnCheck.Add_Click({ Do-Check })
 $form.Add_Shown({
   Say 'Onn Wall Display Deployer' 'White'
   Say 'Works on every onn / Google TV box (HD stick, 4K, 4K Plus, 4K Pro).'
-  Say 'Pick the device (or enter its IP), then press DEPLOY. The app removes'
-  Say 'the streaming apps and sets AbleSign to come up on every reboot.'
+  Say 'Pick the device (or enter its IP), then press DEPLOY. The app strips the'
+  Say 'streaming apps and makes AbleSign come up after every reboot or power'
+  Say 'cut. Content comes from your AbleSign cloud account - nothing to enter.'
   if (Ensure-Adb) { Refresh-Devices }
 })
 

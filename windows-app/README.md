@@ -1,9 +1,13 @@
 # onn Wall Display Deployer (Windows app)
 
-A point-and-click Windows app that turns any **onn / Google TV box** (HD stick,
-4K, 4K Plus, 4K Pro — any Android TV device, really) into a dedicated wall
-display: it removes the streaming apps and makes **AbleSign come up on every
-reboot**, with all errors diagnosed and auto-repaired where possible.
+A point-and-click Windows app with one job: make an **onn / Google TV box**
+(HD stick, 4K, 4K Plus, 4K Pro — any Android TV device) **come up in AbleSign
+after every reboot and power cut**, with nobody touching a remote. It also
+strips the streaming apps, and diagnoses and repairs errors on its own.
+
+**There is no URL to enter.** AbleSign pulls whatever screen your AbleSign
+cloud account assigns to that device — this app only handles the device side:
+getting AbleSign to start, every time.
 
 No install needed on the PC — it even fetches its own copy of `adb` on first
 run.
@@ -45,7 +49,9 @@ run.
 ### Have ready
 
 - The box's IP address.
-- Your AbleSign account already showing the right screen when AbleSign opens.
+- AbleSign already paired to your cloud account and showing the right screen
+  when you open it manually — the app makes it *launch*, it doesn't configure
+  what it plays.
 - The TV remote, for two small prompts (below).
 
 ---
@@ -73,8 +79,9 @@ device-owner mode).
      install it with the remote, then press **DEPLOY** again.
    - At the end, one setting only the remote can set:
      **Projectivy → Settings → General → launch app at startup → AbleSign.**
-5. The box reboots. Within ~60–90 seconds it should land in AbleSign showing
-   your screen — no remote touched.
+5. The box reboots. Within ~60–90 seconds it lands in AbleSign, showing
+   whatever your AbleSign account assigns it — no remote touched. Pull the
+   power and plug it back in to confirm it does the same after an outage.
 
 Every later deploy of the same box (or another box that already has Projectivy
 and AbleSign) is fully automatic.
@@ -89,9 +96,8 @@ without changing anything.
 |---|---|
 | **Device list / Rescan** | Finds boxes on USB **and** network. onn sticks only answer over the network — the list says so when nothing is found. |
 | **IP + Connect** | Connects over the network; retries stale sessions and explains `unauthorized` (the prompt is on the TV). |
-| **Dashboard URL** | The `/screen/<token>` URL from Admin → Screen Fleet. Pushed into Fully Kiosk automatically when its Remote Administration is on. |
-| **AbleSign** | Free path. Hosts it with Projectivy so it starts on every boot, and enables the accessibility service that unlocks that feature. |
-| **Fully Kiosk** | Alternative. Kiosk/launcher mode needs a paid PLUS license per device; the app warns before using it. |
+| **AbleSign** | The default. Hosts it with Projectivy so it starts on every boot, and enables the accessibility service that unlocks that feature. Content comes from the AbleSign cloud — nothing to configure here. |
+| **Fully Kiosk** | Alternative, for showing a plain URL instead. Kiosk/launcher mode needs a paid PLUS license per device; the app warns first, and asks for the URL only if you pick this. |
 | **Remove all streaming apps** | Strips 22 packages (Netflix, YouTube, Disney+, Apple TV, ESPN, Instagram, assistant, screensavers…), reversibly. |
 | **Disable the Google TV home screen** | Removes the Live/Apps rows so nothing competes for boot — only after the replacement verifies. |
 | **Try device-owner** | Strongest possible kiosk lock. Only works on a box where the Google account was skipped at setup, so it's off by default. |
