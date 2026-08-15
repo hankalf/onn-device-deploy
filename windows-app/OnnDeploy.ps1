@@ -172,9 +172,15 @@ $chkOwner.Text = 'Try device-owner (no Google account)'
 $chkOwner.Location = New-Object Drawing.Point(548, 248); $chkOwner.Size = New-Object Drawing.Size(280, 22)
 $form.Controls.Add($chkOwner)
 
+$btnWatch = New-Object Windows.Forms.Button
+$btnWatch.Text = 'Auto-restart watchdog (PC)...'
+$btnWatch.Location = New-Object Drawing.Point(20, 358); $btnWatch.Size = New-Object Drawing.Size(200, 26)
+$form.Controls.Add($btnWatch)
+$null = New-Label 'Last resort that always works: this PC re-launches AbleSign whenever the box loses it.' 228 363 600 $false
+
 $log = New-Object Windows.Forms.RichTextBox
-$log.Location = New-Object Drawing.Point(20, 362)
-$log.Size = New-Object Drawing.Size(800, 240)
+$log.Location = New-Object Drawing.Point(20, 392)
+$log.Size = New-Object Drawing.Size(800, 210)
 $log.ReadOnly = $true; $log.BackColor = [Drawing.Color]::FromArgb(24,24,27)
 $log.ForeColor = [Drawing.Color]::Gainsboro
 $log.Font = New-Object Drawing.Font('Consolas', 9)
@@ -806,6 +812,20 @@ function Route-Lob {
   Sh "cmd appops set $Lob RUN_ANY_IN_BACKGROUND allow" | Out-Null
   Sh "am set-inactive $Lob false" | Out-Null               # out of app-standby
   Ok 'its boot restrictions are cleared'
+  # Being allowed to RUN at boot is not the same as being allowed to PUT
+  # SOMETHING ON SCREEN at boot. Android 12+ blocks the second unless the
+  # caller is exempt, and holding SYSTEM_ALERT_WINDOW is one of the few
+  # exemptions grantable from here. Worth the one line; not a guaranteed cure.
+  Sh "cmd appops set $Lob SYSTEM_ALERT_WINDOW allow" | Out-Null
+  Sh "appops set $Lob SYSTEM_ALERT_WINDOW allow" | Out-Null
+  $sawOn = ((Sh "cmd appops get $Lob SYSTEM_ALERT_WINDOW") -match 'allow')
+  if ($sawOn) {
+    Ok 'granted it draw-over-other-apps, which exempts it from the'
+    Ok 'background-launch block that stops most boot helpers on Android 12+'
+  } else {
+    Warn 'could not grant it draw-over-other-apps. If this route comes back with'
+    Warn '"Background activity launch blocked", use the PC watchdog instead.'
+  }
   Sh "monkey -p $Lob -c android.intent.category.LAUNCHER 1" | Out-Null
   Set-Attempted 'lob'
   Harden
@@ -1084,9 +1104,41 @@ function Diagnose-Solo {
     Info 'Open AbleSign once on the TV with the remote, then verify again.'
     return 'pending'
   }
+  $bal = @(Bal-Lines | Where-Object { $_ -match 'ablesign' })
+  if ($bal.Count) {
+    Explain-Bal $bal
+    return 'fatal'
+  }
   Warn 'The system simply did not deliver the boot broadcast to it, or AbleSign'
   Warn 'ignored it. No PC-side setting can force that on this firmware.'
   return 'fatal'
+}
+
+function Bal-Lines {
+  # Grab just the background-launch refusals out of the log. Cheap enough to
+  # run on every Verify, and it turns "it just did not come up" into a named,
+  # quotable reason.
+  $out = (Adb @('logcat', '-d', '-v', 'time', '-t', '6000'))
+  return @(($out -split "`n") | Where-Object {
+    $_ -match 'Background activity launch blocked|BAL_BLOCK|Abort background activity starts'
+  })
+}
+
+function Explain-Bal($lines) {
+  Step 'Android blocked the launch - this is the whole reason'
+  Fail 'The boot helper ran on time and asked for AbleSign. Android refused it.'
+  foreach ($b in ($lines | Select-Object -First 4)) { Info "   $($b.Trim())" }
+  Info ''
+  Info 'Android 12 and up will not let an app that has nothing on screen start'
+  Info 'another app. The helper is not broken, not out of date, and no setting'
+  Info 'on this PC can grant a normal app that permission.'
+  Info ''
+  Ok 'A launch sent over adb from this PC IS allowed - shell is exempt from the'
+  Ok 'rule. Press "Auto-restart watchdog (PC)" below: it is free, needs nothing'
+  Ok 'installed on the TV, and also recovers crashes and stray remote presses.'
+  Info 'If this PC cannot be left on, the paid on-box routes buy the same'
+  Info 'exemption: Projectivy Premium ($7.49 once, all boxes on one Google'
+  Info 'account) or Fully Kiosk PLUS (per device).'
 }
 
 function Diagnose-Lob {
@@ -1115,6 +1167,11 @@ function Diagnose-Lob {
     return 'pending'
   }
   Ok 'it is not stopped, so it is eligible for the boot broadcast'
+  $bal = @(Bal-Lines | Where-Object { $_ -match [regex]::Escape($Lob) -or $_ -match 'ablesign' })
+  if ($bal.Count) {
+    Explain-Bal $bal
+    return 'fatal'
+  }
   Warn 'That leaves the one thing no PC tool can read or write: which app it is'
   Warn 'set to start. That choice lives in its private storage.'
   Info 'Opening it on the TV now - confirm ABLESIGN is the selected app, then'
@@ -1138,6 +1195,118 @@ function Diagnose-Proj {
   Warn 'so it ran, but did not start AbleSign. That is its startup setting,'
   Warn 'which is part of Projectivy PREMIUM and lives inside the app:'
   Info '   Projectivy > Settings > General > launch app at startup > AbleSign'
+}
+
+# ------------------------------------------------------------- PC watchdog ---
+# When the box refuses to start the player at boot - old helper apps that this
+# firmware no longer honours, launchers that want money for it - the reliable
+# way out is to stop asking the box. This PC already talks to it over adb, so a
+# scheduled task can simply put AbleSign back on screen whenever it is not
+# there. It costs nothing, needs no app on the TV, and also recovers crashes
+# and stray remote presses, which boot-launch alone never would.
+$script:TaskName = 'OnnDeploy AbleSign watchdog'
+
+function Write-WatchdogScript {
+  $path = Join-Path $Store 'watchdog.ps1'
+  $body = @'
+param([string]$Ip, [string]$Adb, [string]$Pkg = 'tv.ablesign.app')
+# Put the signage app back on screen if anything else is showing. Quiet by
+# design: it writes one line per action, nothing when all is well.
+$logFile = Join-Path $env:LOCALAPPDATA 'OnnDeploy\watchdog.log'
+function Note($m) {
+  $line = "{0:yyyy-MM-dd HH:mm:ss}  {1}" -f (Get-Date), $m
+  Add-Content -Path $logFile -Value $line
+  $keep = @(Get-Content $logFile -ErrorAction SilentlyContinue)
+  if ($keep.Count -gt 500) { Set-Content -Path $logFile -Value ($keep[-500..-1]) }
+}
+if ($Ip -notmatch ':\d+$') { $Ip = "$Ip`:5555" }
+& $Adb connect $Ip *>$null
+$top = (& $Adb -s $Ip shell dumpsys activity activities 2>$null |
+        Select-String -Pattern 'topResumedActivity|mResumedActivity' | Select-Object -First 1)
+if (-not $top) { Note "no answer from $Ip"; exit }
+if ("$top" -match [regex]::Escape($Pkg)) { exit }          # already showing - say nothing
+& $Adb -s $Ip shell monkey -p $Pkg -c android.intent.category.LAUNCHER 1 *>$null
+# uid 2000 (shell) is exempt from Android's background-launch block, so this
+# start is allowed where an on-box helper's identical start is refused.
+$was = "$top" -replace '.*\s(\S+/\S+).*', '$1'
+Note "relaunched $Pkg (was: $was)"
+'@
+  Set-Content -Path $path -Value $body -Encoding UTF8
+  return $path
+}
+
+function Watchdog-Installed {
+  try { return [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) } catch { return $false }
+}
+
+function Setup-Watchdog {
+  $ip = $script:Serial
+  if (-not $ip) { $ip = $txtIp.Text.Trim() }
+  if (-not $ip) { Fail 'connect to the box first, so the watchdog knows its address.'; return }
+  if ($ip -notmatch ':\d+$') { $ip = "$ip`:5555" }
+  Step 'Setting up the PC watchdog'
+  if (-not (Test-Path $Store)) { New-Item -ItemType Directory -Path $Store -Force | Out-Null }
+  $script = Write-WatchdogScript
+  Ok "watchdog script: $script"
+  $arg = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Ip {1} -Adb "{2}"' -f $script, $ip, $script:Adb
+  try {
+    $action  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+                            -RepetitionInterval (New-TimeSpan -Minutes 3) `
+                            -RepetitionDuration ([TimeSpan]::FromDays(3650))).Repetition
+    $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+             -StartWhenAvailable -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $set `
+      -Description 'Re-launches AbleSign on the wall display if anything else takes the screen.' `
+      -Force | Out-Null
+    Ok 'scheduled: every 3 minutes, from logon'
+  } catch {
+    Fail "could not register the scheduled task: $($_.Exception.Message)"
+    Info 'You can still run it by hand any time:'
+    Info "   powershell -File `"$script`" -Ip $ip -Adb `"$($script:Adb)`""
+    return
+  }
+  Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  Info ''
+  Ok 'Done. From now on, if the box reboots or anything else takes the screen,'
+  Ok 'this PC puts AbleSign back within ~3 minutes - no app on the TV, no fee.'
+  Info ''
+  Warn 'What it needs to keep working:'
+  Info '  * this PC on and logged in (a screen-off PC is fine, asleep is not)'
+  Info '  * the box keeping this IP - a DHCP reservation is worth doing'
+  Info '  * USB debugging left ON on the box'
+  Info "  * activity log: $(Join-Path $Store 'watchdog.log')"
+}
+
+function Remove-Watchdog {
+  Step 'Removing the PC watchdog'
+  try {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+    Ok 'removed - this PC will no longer touch the box'
+  } catch { Warn "nothing to remove: $($_.Exception.Message)" }
+}
+
+function Do-Watchdog {
+  if (-not (Ensure-Adb)) { return }
+  $log.Clear()
+  $on = Watchdog-Installed
+  $msg = if ($on) {
+    "The watchdog is INSTALLED on this PC.`n`nYes  - reinstall it (new IP or adb path)`nNo   - remove it`nCancel - leave it alone"
+  } else {
+    "Set up the auto-restart watchdog?`n`nThis PC will check the box every 3 minutes and re-launch AbleSign if" +
+    " anything else is on screen - covering reboots, crashes and stray remote presses.`n`nIt needs this PC left on" +
+    " and logged in, and USB debugging left on at the box.`n`nYes - set it up`nNo/Cancel - not now"
+  }
+  $r = [Windows.Forms.MessageBox]::Show($form, $msg, 'Auto-restart watchdog',
+        [Windows.Forms.MessageBoxButtons]::YesNoCancel, [Windows.Forms.MessageBoxIcon]::Question)
+  if ($r -eq [Windows.Forms.DialogResult]::Cancel) { return }
+  if ($on -and $r -eq [Windows.Forms.DialogResult]::No) { Remove-Watchdog; return }
+  if ($r -eq [Windows.Forms.DialogResult]::Yes) {
+    if (-not (Select-Device)) { return }
+    if (-not (Repair-Connection)) { return }
+    Setup-Watchdog
+  }
 }
 
 function Do-DeepScan {
@@ -1229,6 +1398,31 @@ function Analyze-Logs([string]$text, $pkgs) {
     Info 'so the boot is still in the buffer.'
   }
 
+  # Android 12 and up refuse to let a background app put another app on screen.
+  # It is the single most likely reason a boot helper "works" and nothing
+  # appears, because the helper reports success - the OS threw the start away
+  # afterwards. Check it before anything else; it settles the whole question.
+  $bal = @($lines | Where-Object {
+    $_ -match 'Background activity launch blocked|BAL_BLOCK|Abort background activity starts'
+  })
+  if ($bal.Count) {
+    Step 'Android blocked the launch itself (this is the answer)'
+    Fail 'The boot helper ran and asked for AbleSign. Android refused it.'
+    foreach ($b in ($bal | Select-Object -First 6)) { Info "   $($b.Trim())" }
+    Info ''
+    Info 'This is the background-activity-launch rule, added in Android 12 and'
+    Info 'tightened since: an app with nothing on screen may not start another'
+    Info 'app. The helper is not broken and not out of date - it is not allowed.'
+    Info 'Nothing on the PC can grant a normal app that permission.'
+    Info ''
+    Ok 'What IS allowed: a launch sent over adb, from this PC. Shell is exempt.'
+    Ok 'That is what "Auto-restart watchdog (PC)" sets up - free, and it also'
+    Ok 'recovers crashes and stray remote presses, which boot-launch never did.'
+    Info 'Paid alternatives that get the same exemption on the box itself:'
+    Info '   Projectivy Premium ($7.49 once, all boxes on one Google account)'
+    Info '   Fully Kiosk PLUS (per device)'
+  }
+
   foreach ($p in $pkgs) {
     $hit = @($lines | Where-Object { $_ -match [regex]::Escape($p) })
     Step "$p - $($hit.Count) log lines"
@@ -1238,13 +1432,19 @@ function Analyze-Logs([string]$text, $pkgs) {
     }
     $bad = @($hit | Where-Object {
       $_ -match 'Background execution not allowed|Unable to start receiver|Unable to start service|' +
-                'Permission Denial|FATAL EXCEPTION|ANR in|force-stopped|killed|not exported|SecurityException'
+                'Permission Denial|FATAL EXCEPTION|ANR in|force-stopped|killed|not exported|SecurityException|' +
+                'BAL_BLOCK|Background activity launch blocked|Abort background activity starts'
     })
     if ($bad.Count) {
       Fail 'the log names a reason it did not run:'
       foreach ($b in ($bad | Select-Object -First 6)) { Info "   $($b.Trim())" }
     } else {
-      $start = @($hit | Where-Object { $_ -match 'am_proc_start|Start proc|START u0' })
+      # A blocked start still prints START u0, with BAL_BLOCK and a non-zero
+      # result code. Calling that "it did start" would be the exact opposite
+      # of what happened, so those lines are excluded here.
+      $start = @($hit | Where-Object {
+        $_ -match 'am_proc_start|Start proc|START u0' -and $_ -notmatch 'BAL_BLOCK'
+      })
       if ($start.Count) {
         Ok 'it did start:'
         foreach ($s in ($start | Select-Object -First 3)) { Info "   $($s.Trim())" }
@@ -1298,6 +1498,16 @@ function Advance-Route {
       } else {
         Info 'Set Boot method to Launch-On-Boot (or Auto) and press DEPLOY.'
       }
+    }
+    elseif ($att -eq 'lob') {
+      # The free on-box route is out. Do not silently jump to the $7.49 one -
+      # the PC watchdog is free and does strictly more, so it goes first.
+      Info ''
+      Info 'The free on-box route is done here. What is left:'
+      Info '  1. "Auto-restart watchdog (PC)" below - free. This PC re-launches'
+      Info '     AbleSign whenever the box loses it. Needs the PC left on.'
+      Info '  2. Projectivy Premium - $7.49 once, covers every box on the same'
+      Info '     Google account, and needs no PC. Set Boot method to Projectivy.'
     }
   } else {
     Info ''
@@ -1378,6 +1588,7 @@ function Do-VerifyBoot {
 
 $btnVerify.Add_Click({ Do-VerifyBoot })
 $btnLogs.Add_Click({ Do-DeepScan })
+$btnWatch.Add_Click({ Do-Watchdog })
 $btnReq.Add_Click({ [void](Show-Requirements) })
 $btnShot.Add_Click({ Do-Screenshot })
 $btnApk.Add_Click({ Do-InstallApk })
