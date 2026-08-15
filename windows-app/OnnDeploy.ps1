@@ -89,7 +89,7 @@ $form.Controls.Add($btnConnect)
 $null = New-Label '2. Player' 20 155 200 $true
 $null = New-Label 'AbleSign gets its content from your AbleSign cloud account - nothing to enter here.' 20 178 620 $false
 $rbAble = New-Object Windows.Forms.RadioButton
-$rbAble.Text = 'AbleSign  (free routes tried first: own boot receiver, then Launch-On-Boot)'
+$rbAble.Text = 'AbleSign  (free routes first; Verify boot moves to the next one by itself)'
 $rbAble.Location = New-Object Drawing.Point(20, 202); $rbAble.Size = New-Object Drawing.Size(420, 22)
 $rbAble.Checked = $true
 $form.Controls.Add($rbAble)
@@ -150,10 +150,18 @@ $btnPlayAble.Text = 'AbleSign install page'
 $btnPlayAble.Location = New-Object Drawing.Point(328, 326)
 $btnPlayAble.Size = New-Object Drawing.Size(150, 26); $form.Controls.Add($btnPlayAble)
 
-$chkForceProj = New-Object Windows.Forms.CheckBox
-$chkForceProj.Text = 'Force Projectivy route (its boot-launch is Premium, $7.49 one-time)'
-$chkForceProj.Location = New-Object Drawing.Point(20, 248); $chkForceProj.Size = New-Object Drawing.Size(400, 22)
-$form.Controls.Add($chkForceProj)
+$null = New-Label 'Boot method:' 20 250 90 $false
+$cboRoute = New-Object Windows.Forms.ComboBox
+$cboRoute.DropDownStyle = 'DropDownList'
+$cboRoute.Location = New-Object Drawing.Point(110, 246); $cboRoute.Size = New-Object Drawing.Size(430, 24)
+[void]$cboRoute.Items.AddRange(@(
+  'Auto - free routes first, remembers what already failed',
+  "AbleSign's own boot receiver only",
+  'Launch-On-Boot (free helper app)',
+  'Projectivy (its boot-launch is Premium, $7.49 one-time)'
+))
+$cboRoute.SelectedIndex = 0
+$form.Controls.Add($cboRoute)
 
 $chkOwner = New-Object Windows.Forms.CheckBox
 $chkOwner.Text = 'Try device-owner (fresh box, no Google account)'
@@ -638,6 +646,130 @@ function Try-StandaloneAutostart($pkg) {
   return $true
 }
 
+# ------------------------------------------------------- boot-route memory ---
+# Which route was tried on which box, remembered across runs, so "Auto" never
+# re-tries something this box has already proved does not work.
+function State-File {
+  if (-not $script:Serial) { return $null }
+  return (Join-Path $Store ('device-' + ($script:Serial -replace '[^A-Za-z0-9]', '_') + '.txt'))
+}
+function State-Read {
+  $f = State-File
+  if (-not $f -or -not (Test-Path $f)) { return @() }
+  try { return @(Get-Content $f | Where-Object { $_ }) } catch { return @() }
+}
+function State-Add([string]$line) {
+  $f = State-File
+  if (-not $f) { return }
+  try {
+    if (-not (Test-Path $Store)) { New-Item -ItemType Directory -Path $Store -Force | Out-Null }
+    Set-Content -Path $f -Value (@(State-Read | Where-Object { $_ -ne $line }) + $line) -Encoding ASCII
+  } catch { }
+}
+function State-Clear {
+  $f = State-File
+  if ($f -and (Test-Path $f)) { try { Remove-Item $f -Force } catch { } }
+}
+function Route-Failed([string]$r) { return ((State-Read) -contains "failed:$r") }
+function Set-Attempted([string]$r) { State-Add "attempted:$r" }
+function Get-Attempted {
+  $a = @(State-Read | Where-Object { $_ -like 'attempted:*' })
+  if ($a.Count) { return ($a[-1]).Substring(10) }
+  return $null
+}
+function Get-Route {
+  switch ($cboRoute.SelectedIndex) {
+    1 { return 'solo' }
+    2 { return 'lob' }
+    3 { return 'proj' }
+    default { return 'auto' }
+  }
+}
+
+# ------------------------------------------------------------- boot routes ---
+function Route-Solo {
+  # Best case: AbleSign starts itself. No second app, nothing to buy.
+  if (-not (Try-StandaloneAutostart 'tv.ablesign.app')) { return $false }
+  Set-Attempted 'solo'
+  Harden
+  Step 'Rebooting to test AbleSign on its own'
+  Adb @('reboot') | Out-Null
+  Say ''
+  Say 'AbleSign has a boot receiver and its restrictions are cleared, so it' 'LightGreen'
+  Say 'may now start on its own. Press "Verify boot" in ~90s to find out - if' 'LightGreen'
+  Say 'it does not come up, Verify moves on to the next route by itself.' 'LightGreen'
+  return $true
+}
+
+function Route-Lob {
+  Step 'Launch-On-Boot (free, MIT-licensed - its only job is this)'
+  if (-not (Pkg-Installed $Lob)) {
+    Info 'Not on the box yet. Opening its page on the TV - install it with the'
+    Info 'remote, then press DEPLOY again.'
+    Sh "am start -a android.intent.action.VIEW -d market://details?id=$Lob" | Out-Null
+    Info ''
+    Warn 'It is an older app, so some boxes no longer list it in the Store.'
+    Info 'If the TV says "not found", use the releases page opening in your'
+    Info 'browser now: download the .apk, then press "Install APK..." here.'
+    try { Start-Process $LobApkPage -ErrorAction Stop | Out-Null } catch {
+      Info "  $LobApkPage"
+    }
+    return $false
+  }
+  Ok 'installed'
+  Sh "dumpsys deviceidle whitelist +$Lob" | Out-Null       # ignore Doze
+  Sh "cmd appops set $Lob RUN_IN_BACKGROUND allow" | Out-Null
+  Sh "cmd appops set $Lob RUN_ANY_IN_BACKGROUND allow" | Out-Null
+  Sh "am set-inactive $Lob false" | Out-Null               # out of app-standby
+  Ok 'its boot restrictions are cleared'
+  Sh "monkey -p $Lob -c android.intent.category.LAUNCHER 1" | Out-Null
+  Set-Attempted 'lob'
+  Harden
+  Warn 'ONE step on the TV, with the remote (first time only):'
+  Info '   Launch-On-Boot is open on the screen now - choose ABLESIGN in it.'
+  Info 'Then press "Verify boot" here to confirm. Total cost: $0.'
+  return $true
+}
+
+function Route-Proj {
+  Step 'Projectivy launcher route'
+  if (-not (Pkg-Installed $Proj)) {
+    Warn 'Projectivy Launcher is not installed.'
+    Warn 'HEADS UP: Projectivy is free, but its "launch app at startup" feature'
+    Warn 'is PREMIUM - $7.49 one-time, and that one purchase covers every device'
+    Warn 'signed in with the same Google account (unlike Fully Kiosk, per device).'
+    Info 'Opening its Play Store page on the TV - install it with the remote,'
+    Info 'then press DEPLOY again.'
+    Sh "am start -a android.intent.action.VIEW -d market://details?id=$Proj" | Out-Null
+    return $false
+  }
+  if (-not (Set-BootTarget $Proj)) { return $false }
+  Step 'Letting Projectivy start AbleSign at boot'
+  $svc = ((Sh 'cmd package query-services --brief -a android.accessibilityservice.AccessibilityService') -split "`n" |
+          Where-Object { $_ -match [regex]::Escape($Proj) } | Select-Object -First 1)
+  if ($svc) {
+    $svc = $svc.Trim()
+    $cur = (Sh 'settings get secure enabled_accessibility_services').Trim()
+    if ($cur -notmatch [regex]::Escape($svc)) {
+      $merged = if ($cur -and $cur -ne 'null') { "$cur`:$svc" } else { $svc }
+      Sh "settings put secure enabled_accessibility_services $merged" | Out-Null
+      Sh 'settings put secure accessibility_enabled 1' | Out-Null
+    }
+    Ok 'accessibility enabled (this is what unlocks launch-at-startup)'
+  }
+  Set-Attempted 'proj'
+  Warn 'ONE step left on the TV, with the remote (first deploy only):'
+  Info '   Projectivy > Settings > General > launch app at startup > AbleSign'
+  Info 'That option is part of Projectivy PREMIUM ($7.49 one-time, bought inside'
+  Info 'the app; it then covers every box on the same Google account).'
+  Harden
+  Step 'Rebooting'
+  Adb @('reboot') | Out-Null
+  Say ''
+  Say 'Press "Verify boot (reboot + report)" in ~90s to see what came up.' 'LightGreen'
+  return $true
+}
+
 function Set-StartUrl($url) {
   if (-not $url) { return }
   Step 'Start URL'
@@ -678,6 +810,16 @@ function Do-Check {
   Info 'launcher-capable apps:'
   foreach ($h in (Home-List)) { Info "   $h" }
   Info ''
+  $mem = @(State-Read)
+  if ($mem.Count) {
+    Info 'boot-route memory for this box:'
+    foreach ($m in $mem) {
+      if ($m -like 'failed:*')    { Info "   tried and did NOT work: $($m.Substring(7))" }
+      elseif ($m -like 'attempted:*') { Info "   currently set up      : $($m.Substring(10))" }
+    }
+    Info '   (Undo clears the box; the memory only steers which method Auto picks)'
+    Info ''
+  }
   Info 'installed (non-system) apps:'
   foreach ($p in ((Sh 'pm list packages -3') -split "`n" | Where-Object { $_ -match 'package:' })) {
     Info ("   " + ($p -replace 'package:', '').Trim())
@@ -718,10 +860,16 @@ function Do-Deploy {
         'Fully Kiosk needs a page to show. Paste the URL (leave blank to set it on the TV later).',
         'Start URL', '')
       if ($u) { Set-StartUrl $u }
+      Harden
+      Step 'Rebooting to prove it'
+      Adb @('reboot') | Out-Null
+      Say ''
+      Say 'Rebooting. Press "Verify boot (reboot + report)" in ~90s and it will' 'LightGreen'
+      Say 'tell you exactly what came up on the TV - no walking over to check.' 'LightGreen'
     } else {
-      # AbleSign declares no launcher activity, so it cannot own boot itself.
-      # Projectivy can, and starts a chosen app at boot via its accessibility
-      # service - which this app can enable, unlike the in-app toggle.
+      # AbleSign declares no launcher activity, so the only ways it can come up
+      # at boot are its own BOOT_COMPLETED receiver, or another app starting it.
+      # Try them cheapest-first, and never re-try one this box already failed.
       Step 'AbleSign'
       if (-not (Pkg-Installed 'tv.ablesign.app')) {
         Fail 'AbleSign is not installed on this box.'
@@ -732,92 +880,37 @@ function Do-Deploy {
       }
       Ok 'AbleSign present'
 
-      # Prefer AbleSign standing on its own - no second app to configure.
-      $solo = Try-StandaloneAutostart 'tv.ablesign.app'
-      if ($solo -and -not $chkForceProj.Checked) {
-        Harden
-        Step 'Rebooting to test AbleSign on its own'
-        Adb @('reboot') | Out-Null
-        Say ''
-        Say 'AbleSign has a boot receiver and its restrictions are cleared, so it' 'LightGreen'
-        Say 'may now start on its own. Press "Verify boot" in ~90s to find out.' 'LightGreen'
-        Say 'If it does NOT come up, tick "Force the Projectivy route" and deploy' 'Gold'
-        Say 'again - that route always works, at the cost of one setting on the TV.' 'Gold'
-        return
-      }
-
-      # Free route first: a tiny open-source helper whose only job is this.
-      if (Pkg-Installed $Lob) {
-        Step 'Launch-On-Boot (free) is installed - using it'
-        Sh "dumpsys deviceidle whitelist +$Lob" | Out-Null
-        Sh "cmd appops set $Lob RUN_IN_BACKGROUND allow" | Out-Null
-        Sh "cmd appops set $Lob RUN_ANY_IN_BACKGROUND allow" | Out-Null
-        Sh "am set-inactive $Lob false" | Out-Null
-        Ok 'its boot restrictions are cleared'
-        Sh "monkey -p $Lob -c android.intent.category.LAUNCHER 1" | Out-Null
-        Warn 'ONE step on the TV, with the remote (first time only):'
-        Info '   Launch-On-Boot is now open - choose ABLESIGN in it.'
-        Info 'Then press "Verify boot" here to confirm. Total cost: $0.'
-        Harden
-        return
-      }
-      if (-not $chkForceProj.Checked) {
-        Step 'Free option available'
-        Info 'Launch-On-Boot is a small MIT-licensed app whose only job is'
-        Info 'starting a chosen app at boot - the exact feature Projectivy'
-        Info 'and Fully Kiosk charge for. It is free on the Play Store.'
-        Info 'Opening its page on the TV - install it, then press DEPLOY again.'
-        Sh "am start -a android.intent.action.VIEW -d market://details?id=$Lob" | Out-Null
-        Info ''
-        Warn 'It is an older app, so some boxes no longer list it in the Store.'
-        Info 'If the TV shows "not found", use the releases page opening in your'
-        Info 'browser now: download the .apk, then press "Install APK..." here.'
-        try { Start-Process $LobApkPage -ErrorAction Stop | Out-Null } catch {
-          Info "  $LobApkPage"
+      switch (Get-Route) {
+        'solo' {
+          if (-not (Route-Solo)) {
+            Fail 'AbleSign cannot start itself on this box - pick another method.'
+          }
         }
-        Info ''
-        Info 'Prefer the paid launcher instead? Tick "Force Projectivy route".'
-        return
-      }
-      if (-not (Pkg-Installed $Proj)) {
-        Warn 'Projectivy Launcher is needed to start AbleSign at boot.'
-        Warn 'HEADS UP: Projectivy is free, but its "launch app at startup"'
-        Warn 'feature is PREMIUM - $7.49 one-time, and that one purchase covers'
-        Warn 'every device signed in with the same Google account (unlike Fully'
-        Warn 'Kiosk, which licenses per device).'
-        Info 'Opening its Play Store page on the TV - install it with the remote,'
-        Info 'then press Deploy again.'
-        Sh "am start -a android.intent.action.VIEW -d market://details?id=$Proj" | Out-Null
-        return
-      }
-      if (-not (Set-BootTarget $Proj)) { return }
-      Step 'Letting Projectivy start AbleSign at boot'
-      $svc = ((Sh 'cmd package query-services --brief -a android.accessibilityservice.AccessibilityService') -split "`n" |
-              Where-Object { $_ -match [regex]::Escape($Proj) } | Select-Object -First 1)
-      if ($svc) {
-        $svc = $svc.Trim()
-        $cur = (Sh 'settings get secure enabled_accessibility_services').Trim()
-        if ($cur -notmatch [regex]::Escape($svc)) {
-          $merged = if ($cur -and $cur -ne 'null') { "$cur`:$svc" } else { $svc }
-          Sh "settings put secure enabled_accessibility_services $merged" | Out-Null
-          Sh 'settings put secure accessibility_enabled 1' | Out-Null
+        'lob'  { Route-Lob  | Out-Null }
+        'proj' { Route-Proj | Out-Null }
+        default {
+          # Auto: cheapest first, skipping anything this box already failed.
+          $done = $false
+          if (Route-Failed 'solo') {
+            Info 'Skipping AbleSign own boot receiver - already failed on this box.'
+          } else {
+            $done = Route-Solo
+            if (-not $done) { Info 'Falling through to the next free route.' }
+          }
+          if (-not $done) {
+            if (Route-Failed 'lob') {
+              Info 'Skipping Launch-On-Boot - already failed on this box.'
+              Warn 'Both free routes are exhausted here. Trying Projectivy, whose'
+              Warn 'launch-at-startup is Premium ($7.49 one-time, every box on the'
+              Warn 'same Google account). Undo reverses everything it changes.'
+              Route-Proj | Out-Null
+            } else {
+              Route-Lob | Out-Null
+            }
+          }
         }
-        Ok 'accessibility enabled (this is what unlocks launch-at-startup)'
       }
-      Warn 'ONE step left on the TV, with the remote (first deploy only):'
-      Info '   Projectivy > Settings > General > launch app at startup > AbleSign'
-      Info 'That option is part of Projectivy PREMIUM ($7.49 one-time, bought'
-      Info 'inside the app; it then covers every box on the same Google account).'
-      Info 'After that: every reboot goes straight into AbleSign, which shows'
-      Info 'whatever screen you assigned it in the AbleSign dashboard.'
     }
-
-    Harden
-    Step 'Rebooting to prove it'
-    Adb @('reboot') | Out-Null
-    Say ''
-    Say 'Rebooting. Press "Verify boot (reboot + report)" in ~90s and it will' 'LightGreen'
-    Say 'tell you exactly what came up on the TV - no walking over to check.' 'LightGreen'
   } catch {
     Fail "unexpected error: $($_.Exception.Message)"
   } finally {
@@ -881,6 +974,46 @@ function Do-InstallApk {
   if ($r -match 'Success') { Ok 'installed' } else { Fail $r.Trim() }
 }
 
+function Advance-Route {
+  # The route we just tested did not bring AbleSign up. Record that against this
+  # box so Auto never wastes a reboot on it again, then take the next free step
+  # right here rather than sending the user back to DEPLOY.
+  $att = Get-Attempted
+  if ($att) { State-Add "failed:$att" }
+  if ((Get-Route) -ne 'auto') {
+    Info 'Boot method is set manually, so nothing is being changed for you.'
+    Info 'Switch it to "Auto", or pick the next method, then press DEPLOY.'
+    return
+  }
+  switch ($att) {
+    'solo' {
+      Warn 'So AbleSign own boot receiver is not enough on this firmware.'
+      Info 'Moving straight on to the free Launch-On-Boot route - nothing to buy.'
+      Info ''
+      Route-Lob | Out-Null
+    }
+    'lob' {
+      Warn 'Launch-On-Boot did not start it either.'
+      Info 'Before accepting that: did you choose ABLESIGN inside Launch-On-Boot'
+      Info 'with the remote? Without that it has nothing to start. If not, do it'
+      Info 'now and press Verify again - this box is marked failed until then.'
+      Info ''
+      Info 'If you did, both free routes are genuinely exhausted here. What is'
+      Info 'left costs money: Projectivy Premium ($7.49 once, all boxes on the'
+      Info 'same Google account), Fully Kiosk PLUS (per device), or the Amazon'
+      Info 'Signage Stick, which boots into its player with none of this.'
+      Info 'To take the Projectivy route: set Boot method to Projectivy, DEPLOY.'
+    }
+    'proj' {
+      Warn 'The Projectivy route did not hold either.'
+      Info 'Press "Check only" and read what owns home - that names the blocker.'
+    }
+    default {
+      Info 'Press DEPLOY - it picks the next method this box has not failed yet.'
+    }
+  }
+}
+
 function Do-VerifyBoot {
   if (-not (Ensure-Adb)) { return }
   if (-not (Select-Device)) { return }
@@ -916,7 +1049,11 @@ function Do-VerifyBoot {
     $pkg = $Matches[1]
     Info "on screen: $pkg"
     switch -Wildcard ($pkg) {
-      '*ablesign*' { Ok 'AbleSign launched by itself - this box is done.'; return }
+      '*ablesign*' {
+        Ok 'AbleSign launched by itself - this box is done.'
+        State-Clear
+        return
+      }
       '*projengmenu*' {
         Warn 'Projectivy came up, but it did not start AbleSign.'
         Info 'That last hop is a setting inside Projectivy that no PC tool can'
@@ -926,11 +1063,15 @@ function Do-VerifyBoot {
         return
       }
       '*launcherx*' {
-        Warn 'The Google TV home came up - the boot takeover did not hold.'
-        Info 'Press DEPLOY (it will install/repair what is missing), then verify again.'
+        Warn 'The Google TV home came up - AbleSign was not started.'
+        Advance-Route
         return
       }
-      default { Warn "Something else owns the screen: $pkg" }
+      default {
+        Warn "Something else owns the screen: $pkg"
+        Advance-Route
+        return
+      }
     }
   } else {
     Warn 'could not read what is on screen'

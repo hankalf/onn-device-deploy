@@ -76,21 +76,24 @@ device-owner mode).
    pops *"Allow USB debugging?"* — accept it with the remote, tick **Always
    allow**. Press Connect again if it timed out waiting.
 3. Leave **AbleSign** selected, press **DEPLOY**.
-4. The app runs the whole sequence, narrating each step. Two interactions may
-   come up on the first deploy:
-   - If **Projectivy Launcher** (the free launcher that starts AbleSign at
-     boot) isn't installed yet, the app opens its Play Store page on the TV —
-     install it with the remote, then press **DEPLOY** again.
-   - At the end, one setting only the remote can set:
-     **Projectivy → Settings → General → launch app at startup → AbleSign.**
-5. The box reboots. Press **Verify boot (reboot + report)** — it waits for the
-   box and names whatever app actually came up, so you don't have to walk to
-   the TV. Expect AbleSign within ~90 seconds, showing whatever your AbleSign
-   account assigns it. Finally, pull the power and plug it back in to confirm
-   it does the same after a real outage.
+4. The app strips the streaming apps and sets up the **first free boot route**:
+   AbleSign's own boot receiver. Then it reboots.
+5. Press **Verify boot (reboot + report)**. It waits for the box and names what
+   actually came up:
+   - **AbleSign** → done, that box is finished and it cost nothing.
+   - **anything else** → it records that route as failed for this box and
+     immediately sets up the next free route, **Launch-On-Boot**, in the same
+     press. If that app isn't on the box it opens its Store page on the TV and
+     its [releases page](https://github.com/ITVlab/Launch-On-Boot/releases/latest)
+     in your browser (it's an older app some boxes no longer list) — install it,
+     press **DEPLOY**, then choose **AbleSign** inside it with the remote.
+6. Press **Verify boot** again. Repeat until it reports AbleSign. Finally, pull
+   the power and plug it back in to confirm it survives a real outage.
 
-Every later deploy of the same box (or another box that already has Projectivy
-and AbleSign) is fully automatic.
+Each failed route is remembered per box, so **Auto** never spends another
+reboot on something that has already been proved not to work here — and
+**Check only** prints that memory. Once a box is set up, later deploys are
+fully automatic.
 
 **Undo (back to stock):** the app's *Undo* button restores the Google TV home
 and reinstalls the removed apps. **Check only** reports the device's state
@@ -102,11 +105,11 @@ without changing anything.
 |---|---|
 | **Device list / Rescan** | Finds boxes on USB **and** network. onn sticks only answer over the network — the list says so when nothing is found. |
 | **IP + Connect** | Connects over the network; retries stale sessions and explains `unauthorized` (the prompt is on the TV). |
-| **AbleSign** | The default. Tries AbleSign's own boot receiver, then free Launch-On-Boot, and only then the paid Projectivy route. Content comes from the AbleSign cloud — nothing to configure here. |
+| **AbleSign** | The default. Content comes from the AbleSign cloud — nothing to configure here. How it's made to start at boot is the **Boot method** setting below. |
 | **Fully Kiosk** | Alternative, for showing a plain URL instead. Kiosk/launcher mode needs a paid PLUS license per device; the app warns first, and asks for the URL only if you pick this. |
 | **Remove all streaming apps** | Strips 22 packages (Netflix, YouTube, Disney+, Apple TV, ESPN, Instagram, assistant, screensavers…), reversibly. |
 | **Disable the Google TV home screen** | Removes the Live/Apps rows so nothing competes for boot — only after the replacement verifies. |
-| **Force the Projectivy route** | Skips trying to make AbleSign start on its own and goes straight to the launcher-hosted route. Always works — but needs Projectivy Premium ($7.49 one-time, all devices) plus one setting on the TV. |
+| **Boot method** | Which way AbleSign is made to start. **Auto** (default) tries the free routes cheapest-first and remembers per box which ones have already failed, so it never wastes a reboot repeating one. Pick a specific route to override it: *AbleSign's own boot receiver*, *Launch-On-Boot* (free), or *Projectivy* (its boot-launch is Premium, $7.49 one-time, all devices). |
 | **Try device-owner** | Strongest possible kiosk lock. Only works on a box where the Google account was skipped at setup, so it's off by default. |
 | **DEPLOY** | Shows Requirements, then runs the whole sequence and reboots to prove it. |
 | **Undo** | Back to stock: home restored, apps reinstalled. |
@@ -115,7 +118,7 @@ without changing anything.
 | **Screenshot** | Grabs what's on the TV right now and opens it — useful for "is it blank or is it not launching?". |
 | **Install APK…** | Sideload any APK (AbleSign, Projectivy, Fully) without the Play Store. |
 | **Reboot box** | Power-cycle test without walking to the TV. |
-| **Verify boot (reboot + report)** | The one that closes the loop: reboots, waits for the box, then names the app that actually came up — AbleSign (done), Projectivy (its startup setting isn't pointed at AbleSign yet), or the Google TV home (the takeover didn't hold — press DEPLOY). |
+| **Verify boot (reboot + report)** | The one that closes the loop: reboots, waits for the box, then names the app that actually came up. If it isn't AbleSign, it marks that route failed for this box and **moves on to the next free route in the same press** — no going back to DEPLOY to try again. |
 | **Open AbleSign install page on TV** | Jumps the TV straight to the Play Store page. |
 
 ## What actually costs money (read this first)
@@ -144,26 +147,36 @@ assuming. An Android app can start at boot in exactly two ways:
    if it ships dormant, and clears the Doze / background / app-standby limits
    that silently stop boot receivers from firing.
 
-If AbleSign has that receiver, **Projectivy is not needed and nothing costs
-money** — the deploy stops there; press **Verify boot** to confirm. If it has
-neither, no tool can route around it: something else has to start it, and that
-something costs $7.49 once (Projectivy Premium) or per device (Fully Kiosk
-PLUS).
+Having that receiver isn't the same as it firing — Android has tightened
+`BOOT_COMPLETED` a lot, and on some firmware it simply doesn't. So the app
+doesn't *assume* the receiver worked: **Verify boot** checks, and if AbleSign
+didn't come up it moves to free Launch-On-Boot on its own. Only when both free
+routes have actually failed on that box does it say the remaining options cost
+money — $7.49 once (Projectivy Premium) or per device (Fully Kiosk PLUS).
 
 ## If it still doesn't auto-launch
 
-Press **Check only**, and read the two lines that matter:
+Press **Check only**. It prints the box's boot-route memory — which methods
+have been tried here and which one is currently set up — plus the lines that
+matter:
 
+- **`news.androidtv.launchonboot` in the app list, but AbleSign still doesn't
+  come up** → the app is installed but hasn't been *told* what to start. Open
+  it on the TV and choose AbleSign; that choice lives in its private storage,
+  so no PC tool can write it.
 - **`com.spocky.projengmenu` missing from the app list** → Projectivy isn't
-  installed (a factory reset wipes it). Press **DEPLOY**; it opens the Play
-  Store page on the TV, then finishes on the next press.
+  installed (a factory reset wipes it). Set **Boot method** to Projectivy and
+  press **DEPLOY**; it opens the Play Store page on the TV, then finishes on
+  the next press.
 - **home resolves to `...launcherx...`** → the boot takeover didn't hold.
-  Press **DEPLOY** with *Disable the Google TV home screen* ticked.
+  Press **DEPLOY** with *Disable the Google TV home screen* ticked. (This only
+  applies to the launcher-hosted routes; the free routes leave home alone.)
 - **home resolves to `...projengmenu...` but AbleSign never appears** → the
   only remaining step, and no PC tool can do it: on the TV,
   **Projectivy → Settings → General → launch app at startup → AbleSign**.
 
-**Verify boot** distinguishes all three for you in one press.
+**Verify boot** distinguishes all of these for you in one press — and acts on
+them instead of just reporting.
 
 ## Everything it repairs on its own
 
