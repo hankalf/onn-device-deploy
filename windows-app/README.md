@@ -115,6 +115,7 @@ without changing anything.
 | **Undo** | Back to stock: home restored, apps reinstalled. |
 | **Check only** | Full state report, changes nothing. |
 | **Requirements** | The pre-flight checklist on demand. |
+| **Scan + logs** | Deep diagnosis. Pulls the device log, every boot receiver, home resolution, Doze/appops/standby state and a full dump of each signage-related app into one timestamped report, then **reads the log back to you** — whether the boot broadcast fired, whether each app ran, and any `Background execution not allowed` / `Unable to start receiver` / crash lines naming it. Run it right after **Verify boot**, while the boot is still in the log buffer. |
 | **Screenshot** | Grabs what's on the TV right now and opens it — useful for "is it blank or is it not launching?". |
 | **Install APK…** | Sideload any APK (AbleSign, Projectivy, Fully) over the same Wi-Fi connection — no Play Store, no USB stick. |
 | **Reboot box** | Power-cycle test without walking to the TV. |
@@ -179,7 +180,16 @@ matter:
   **Projectivy → Settings → General → launch app at startup → AbleSign**.
 
 **Verify boot** distinguishes all of these for you in one press — and acts on
-them instead of just reporting.
+them instead of just reporting. When it can't bring AbleSign up it names the
+cause: the app not installed, its boot receiver missing or disabled, the app
+sitting in Android's *stopped* state (a stopped app receives no boot broadcast
+at all — the commonest silent cause), or the one in-app choice no PC tool can
+write. A route is only written off as failed when it genuinely cannot work on
+that box; an outstanding step on the TV never counts against it.
+
+For anything it can't name, press **Scan + logs** immediately afterwards — the
+boot is still in the device log, and the report says in plain terms what
+blocked the launch.
 
 ## Everything it repairs on its own
 

@@ -145,6 +145,10 @@ $btnVerify.Text = 'Verify boot (reboot + report)'
 $btnVerify.Location = New-Object Drawing.Point(544, 326)
 $btnVerify.Size = New-Object Drawing.Size(180, 26); $form.Controls.Add($btnVerify)
 
+$btnLogs = New-Object Windows.Forms.Button
+$btnLogs.Text = 'Scan + logs'; $btnLogs.Location = New-Object Drawing.Point(728, 326)
+$btnLogs.Size = New-Object Drawing.Size(100, 26); $form.Controls.Add($btnLogs)
+
 $btnPlayAble = New-Object Windows.Forms.Button
 $btnPlayAble.Text = 'AbleSign install page'
 $btnPlayAble.Location = New-Object Drawing.Point(328, 326)
@@ -164,8 +168,8 @@ $cboRoute.SelectedIndex = 0
 $form.Controls.Add($cboRoute)
 
 $chkOwner = New-Object Windows.Forms.CheckBox
-$chkOwner.Text = 'Try device-owner (fresh box, no Google account)'
-$chkOwner.Location = New-Object Drawing.Point(430, 248); $chkOwner.Size = New-Object Drawing.Size(400, 22)
+$chkOwner.Text = 'Try device-owner (no Google account)'
+$chkOwner.Location = New-Object Drawing.Point(548, 248); $chkOwner.Size = New-Object Drawing.Size(280, 22)
 $form.Controls.Add($chkOwner)
 
 $log = New-Object Windows.Forms.RichTextBox
@@ -1004,6 +1008,7 @@ function Do-Undo {
   if (-not (Select-Device)) { return }
   if (-not (Repair-Connection)) { return }
   Step 'Restoring the box to stock'
+  State-Clear          # the box is stock again, so what failed on it no longer applies
   Restore-Stock
   foreach ($p in $Bloat) { Sh "cmd package install-existing $p" | Out-Null }
   Start-Sleep 1
@@ -1054,44 +1059,255 @@ function Do-InstallApk {
   if ($r -match 'Success') { Ok 'installed' } else { Fail $r.Trim() }
 }
 
-function Advance-Route {
-  # The route we just tested did not bring AbleSign up. Record that against this
-  # box so Auto never wastes a reboot on it again, then take the next free step
-  # right here rather than sending the user back to DEPLOY.
-  $att = Get-Attempted
-  if ($att) { State-Add "failed:$att" }
-  if ((Get-Route) -ne 'auto') {
-    Info 'Boot method is set manually, so nothing is being changed for you.'
-    Info 'Switch it to "Auto", or pick the next method, then press DEPLOY.'
+function Stopped-State($pkg) {
+  # Android parks a freshly installed app in the "stopped" state, and a stopped
+  # app receives NO broadcasts at all - including BOOT_COMPLETED. Opening it
+  # once is what clears it. This is the commonest silent cause of all of this.
+  return ((Sh "dumpsys package $pkg") -match 'stopped=true')
+}
+
+# The Diagnose-* functions return 'fatal' (this route cannot work on this box)
+# or 'pending' (it still can, but a step is outstanding). Only 'fatal' is
+# remembered as a failure, so a route is never written off over a missed step.
+function Diagnose-Solo {
+  Step 'Why AbleSign did not start itself'
+  $rx = (Sh 'cmd package query-receivers --brief -a android.intent.action.BOOT_COMPLETED') -split "`n" |
+        Where-Object { $_ -match 'ablesign' } | ForEach-Object { $_.Trim() }
+  if (-not $rx) {
+    Fail 'AbleSign registers no boot receiver, so it can never start itself.'
+    Info 'That is the app, not the box - something else has to start it.'
+    return 'fatal'
+  }
+  Ok "it does have one: $($rx -join ', ')"
+  if (Stopped-State 'tv.ablesign.app') {
+    Warn 'but AbleSign is in the stopped state, so it gets no broadcasts.'
+    Info 'Open AbleSign once on the TV with the remote, then verify again.'
+    return 'pending'
+  }
+  Warn 'The system simply did not deliver the boot broadcast to it, or AbleSign'
+  Warn 'ignored it. No PC-side setting can force that on this firmware.'
+  return 'fatal'
+}
+
+function Diagnose-Lob {
+  Step 'Why Launch-On-Boot did not start it'
+  if (-not ((Pkg-Installed $Lob) -or (Find-Lob))) {
+    Fail 'It is not on the box at all - so nothing was ever going to start.'
+    Info 'The older app builds asked the TV Store for it and the Store no longer'
+    Info 'lists it. The current app installs it from the PC over Wi-Fi instead:'
+    Info 'set Boot method to Launch-On-Boot and press DEPLOY - watch for the'
+    Info 'line "installed - no Play Store needed".'
+    return 'pending'
+  }
+  Ok "installed: $Lob"
+  $rx = (Sh 'cmd package query-receivers --brief -a android.intent.action.BOOT_COMPLETED') -split "`n" |
+        Where-Object { $_ -match [regex]::Escape($Lob) } | ForEach-Object { $_.Trim() }
+  if (-not $rx) {
+    Fail 'its boot receiver is missing or disabled - this build cannot work here.'
+    return 'fatal'
+  }
+  Ok 'its boot receiver is registered and enabled'
+  if (Stopped-State $Lob) {
+    Warn 'it is in the stopped state, so it receives no boot broadcast.'
+    Info 'It must be OPENED once on the TV. Opening it now...'
+    Sh "monkey -p $Lob -c android.intent.category.LAUNCHER 1" | Out-Null
+    Info 'Choose ABLESIGN in it with the remote, then verify again.'
+    return 'pending'
+  }
+  Ok 'it is not stopped, so it is eligible for the boot broadcast'
+  Warn 'That leaves the one thing no PC tool can read or write: which app it is'
+  Warn 'set to start. That choice lives in its private storage.'
+  Info 'Opening it on the TV now - confirm ABLESIGN is the selected app, then'
+  Info 'press Verify again. If it already says AbleSign, this route is beaten on'
+  Info 'this firmware and what is left costs money (Projectivy Premium $7.49'
+  Info 'once, Fully Kiosk PLUS per device) - or the Amazon Signage Stick.'
+  Sh "monkey -p $Lob -c android.intent.category.LAUNCHER 1" | Out-Null
+  return 'pending'
+}
+
+function Diagnose-Proj {
+  Step 'Why the Projectivy route did not hold'
+  $h = Home-Now
+  Info "home resolves to : $h"
+  if ($h -notmatch [regex]::Escape($Proj)) {
+    Fail 'Projectivy is not the home app, so it never ran at boot.'
+    Info 'Tick "Disable the Google TV home screen" and press DEPLOY.'
     return
   }
-  switch ($att) {
-    'solo' {
-      Warn 'So AbleSign own boot receiver is not enough on this firmware.'
-      Info 'Moving straight on to the free Launch-On-Boot route - nothing to buy.'
-      Info ''
-      Route-Lob | Out-Null
+  Ok 'Projectivy owns home'
+  Warn 'so it ran, but did not start AbleSign. That is its startup setting,'
+  Warn 'which is part of Projectivy PREMIUM and lives inside the app:'
+  Info '   Projectivy > Settings > General > launch app at startup > AbleSign'
+}
+
+function Do-DeepScan {
+  # Everything a boot failure could plausibly be hiding in, pulled in one pass,
+  # written to a file you can send on, and read back for the lines that matter.
+  if (-not (Ensure-Adb)) { return }
+  if (-not (Select-Device)) { return }
+  if (-not (Repair-Connection)) { return }
+  $log.Clear()
+  Step 'Deep scan - this takes a minute'
+
+  $pkgs = @('tv.ablesign.app', $Lob, $Proj, $Fully) | Select-Object -Unique
+  $found = @(Installed-List)
+  $pkgs = @($pkgs | Where-Object { $found -contains $_ })
+  if ($found | Where-Object { $_ -match 'ablesign|launch.?on.?boot|projeng|ozerov' }) {
+    $pkgs = @($pkgs + ($found | Where-Object { $_ -match 'ablesign|launch.?on.?boot|projeng|ozerov' })) |
+            Select-Object -Unique
+  }
+  Info ("apps of interest: " + $(if ($pkgs.Count) { $pkgs -join ', ' } else { 'none installed' }))
+
+  # Single quotes inside these commands, never double: the whole string is
+  # already wrapped in double quotes on the way to adb.
+  $sections = [ordered]@{
+    'device'              = "getprop | grep -E 'ro.product|ro.build.version|ro.build.type'"
+    'home resolution'     = 'cmd package resolve-activity -c android.intent.category.HOME --brief'
+    'home candidates'     = 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME'
+    'boot receivers'      = 'cmd package query-receivers --brief -a android.intent.action.BOOT_COMPLETED'
+    'user apps'           = 'pm list packages -3'
+    'disabled packages'   = 'pm list packages -d'
+    'doze whitelist'      = 'dumpsys deviceidle whitelist'
+    'accessibility'       = 'settings get secure enabled_accessibility_services'
+    'display settings'    = 'settings get secure sleep_timeout; settings get secure screensaver_enabled; settings get global stay_on_while_plugged_in'
+    'foreground activity' = "dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity|mFocusedApp'"
+    'app standby buckets' = "dumpsys usagestats | grep -E 'standby|bucket' | head -40"
+  }
+
+  $sb = New-Object Text.StringBuilder
+  [void]$sb.AppendLine("onn deploy scan  serial=$($script:Serial)")
+  foreach ($k in $sections.Keys) {
+    Info "collecting: $k"
+    [void]$sb.AppendLine("`r`n===== $k =====")
+    [void]$sb.AppendLine((Sh $sections[$k]))
+  }
+  foreach ($p in $pkgs) {
+    Info "collecting: $p details"
+    [void]$sb.AppendLine("`r`n===== dumpsys package $p =====")
+    [void]$sb.AppendLine((Sh "dumpsys package $p"))
+    [void]$sb.AppendLine("`r`n===== appops $p =====")
+    [void]$sb.AppendLine((Sh "cmd appops get $p"))
+  }
+
+  Info 'collecting: system log (this is the slow part)'
+  $main = (Adb @('logcat', '-d', '-v', 'time', '-t', '12000'))
+  [void]$sb.AppendLine("`r`n===== logcat (default buffers) =====")
+  [void]$sb.AppendLine($main)
+  $events = (Adb @('logcat', '-d', '-v', 'time', '-t', '4000', '-b', 'events'))
+  [void]$sb.AppendLine("`r`n===== logcat events =====")
+  [void]$sb.AppendLine($events)
+
+  if (-not (Test-Path $Store)) { New-Item -ItemType Directory -Path $Store -Force | Out-Null }
+  $file = Join-Path $Store ("scan-{0:yyyyMMdd-HHmmss}.txt" -f (Get-Date))
+  try {
+    Set-Content -Path $file -Value $sb.ToString() -Encoding UTF8
+    Ok "full report saved: $file"
+  } catch { Fail "could not save the report: $($_.Exception.Message)" }
+
+  Analyze-Logs ($main + "`n" + $events) $pkgs
+  if (Test-Path $file) {
+    Info ''
+    Info 'The whole report is in that file - send it on if you want another pair'
+    Info 'of eyes. Opening it now.'
+    try { Invoke-Item $file } catch { }
+  }
+}
+
+function Analyze-Logs([string]$text, $pkgs) {
+  # The log is 15k lines; these are the handful of lines that ever explain a
+  # boot-launch failure. Read them out rather than making anyone scroll.
+  Step 'What the log actually says'
+  $lines = $text -split "`n"
+
+  $boot = @($lines | Where-Object { $_ -match 'boot_progress_enable_screen|Boot completed|BOOT_COMPLETED' })
+  if ($boot.Count) {
+    Ok "the boot broadcast is in the log ($($boot.Count) related lines)"
+    foreach ($b in ($boot | Select-Object -First 4)) { Info "   $($b.Trim())" }
+  } else {
+    Warn 'no boot broadcast in the buffer - the log has already rolled over.'
+    Info 'Press "Verify boot" (which reboots) and run this scan straight after,'
+    Info 'so the boot is still in the buffer.'
+  }
+
+  foreach ($p in $pkgs) {
+    $hit = @($lines | Where-Object { $_ -match [regex]::Escape($p) })
+    Step "$p - $($hit.Count) log lines"
+    if (-not $hit.Count) {
+      Warn 'it does not appear in the log at all - it never ran.'
+      continue
     }
-    'lob' {
-      Warn 'Launch-On-Boot did not start it either.'
-      Info 'Before accepting that: did you choose ABLESIGN inside Launch-On-Boot'
-      Info 'with the remote? Without that it has nothing to start. If not, do it'
-      Info 'now and press Verify again - this box is marked failed until then.'
-      Info ''
-      Info 'If you did, both free routes are genuinely exhausted here. What is'
-      Info 'left costs money: Projectivy Premium ($7.49 once, all boxes on the'
-      Info 'same Google account), Fully Kiosk PLUS (per device), or the Amazon'
-      Info 'Signage Stick, which boots into its player with none of this.'
-      Info 'To take the Projectivy route: set Boot method to Projectivy, DEPLOY.'
-    }
-    'proj' {
-      Warn 'The Projectivy route did not hold either.'
-      Info 'Press "Check only" and read what owns home - that names the blocker.'
-    }
-    default {
-      Info 'Press DEPLOY - it picks the next method this box has not failed yet.'
+    $bad = @($hit | Where-Object {
+      $_ -match 'Background execution not allowed|Unable to start receiver|Unable to start service|' +
+                'Permission Denial|FATAL EXCEPTION|ANR in|force-stopped|killed|not exported|SecurityException'
+    })
+    if ($bad.Count) {
+      Fail 'the log names a reason it did not run:'
+      foreach ($b in ($bad | Select-Object -First 6)) { Info "   $($b.Trim())" }
+    } else {
+      $start = @($hit | Where-Object { $_ -match 'am_proc_start|Start proc|START u0' })
+      if ($start.Count) {
+        Ok 'it did start:'
+        foreach ($s in ($start | Select-Object -First 3)) { Info "   $($s.Trim())" }
+      } else {
+        Info 'present in the log, but with no start and no error - see the report.'
+      }
     }
   }
+
+  $general = @($lines | Where-Object {
+    $_ -match 'Background execution not allowed' -or $_ -match 'BOOT_COMPLETED.*not allowed'
+  })
+  if ($general.Count) {
+    Step 'Android refused a boot broadcast to somebody'
+    Info 'This is the "background execution not allowed" wall - the exact thing'
+    Info 'the clean-up steps target. Lines:'
+    foreach ($g in ($general | Select-Object -First 6)) { Info "   $($g.Trim())" }
+  }
+}
+
+function Advance-Route {
+  # The route we just tested did not bring AbleSign up. Say WHY - a bare "that
+  # failed, try something else" is what made this take so many rounds - then
+  # take the next free step automatically when the method is on Auto.
+  $att = Get-Attempted
+  if (-not $att) { $att = Get-Route }          # manual pick, nothing recorded yet
+  if ($att -eq 'auto') { $att = $null }
+
+  $verdict = 'pending'
+  switch ($att) {
+    'solo' { $verdict = Diagnose-Solo }
+    'lob'  { $verdict = Diagnose-Lob }
+    'proj' { $verdict = Diagnose-Proj }
+    default {
+      Info 'No route has been set up on this box yet.'
+      Info 'Press DEPLOY - Auto picks the cheapest method that has not failed.'
+      return
+    }
+  }
+
+  # Only write a route off when it genuinely cannot work here. A missed step on
+  # the TV is not a failed route, and marking it as one sends Auto to the paid
+  # option for no reason.
+  if ($verdict -eq 'fatal') {
+    State-Add "failed:$att"
+    if ($att -eq 'solo') {
+      Info ''
+      if ((Get-Route) -eq 'auto') {
+        Info 'Moving on to the free Launch-On-Boot route - nothing to buy.'
+        Route-Lob | Out-Null
+      } else {
+        Info 'Set Boot method to Launch-On-Boot (or Auto) and press DEPLOY.'
+      }
+    }
+  } else {
+    Info ''
+    Info 'Not written off - the step above is still outstanding, so this method'
+    Info 'has not actually been beaten yet.'
+  }
+
+  Info ''
+  Info 'Want the full picture? Press "Scan + logs" NOW, while this boot is still'
+  Info 'in the device log - it reads out exactly what blocked the launch.'
 }
 
 function Do-VerifyBoot {
@@ -1161,6 +1377,7 @@ function Do-VerifyBoot {
 }
 
 $btnVerify.Add_Click({ Do-VerifyBoot })
+$btnLogs.Add_Click({ Do-DeepScan })
 $btnReq.Add_Click({ [void](Show-Requirements) })
 $btnShot.Add_Click({ Do-Screenshot })
 $btnApk.Add_Click({ Do-InstallApk })
