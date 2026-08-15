@@ -79,9 +79,11 @@ device-owner mode).
      install it with the remote, then press **DEPLOY** again.
    - At the end, one setting only the remote can set:
      **Projectivy → Settings → General → launch app at startup → AbleSign.**
-5. The box reboots. Within ~60–90 seconds it lands in AbleSign, showing
-   whatever your AbleSign account assigns it — no remote touched. Pull the
-   power and plug it back in to confirm it does the same after an outage.
+5. The box reboots. Press **Verify boot (reboot + report)** — it waits for the
+   box and names whatever app actually came up, so you don't have to walk to
+   the TV. Expect AbleSign within ~90 seconds, showing whatever your AbleSign
+   account assigns it. Finally, pull the power and plug it back in to confirm
+   it does the same after a real outage.
 
 Every later deploy of the same box (or another box that already has Projectivy
 and AbleSign) is fully automatic.
@@ -108,7 +110,23 @@ without changing anything.
 | **Screenshot** | Grabs what's on the TV right now and opens it — useful for "is it blank or is it not launching?". |
 | **Install APK…** | Sideload any APK (AbleSign, Projectivy, Fully) without the Play Store. |
 | **Reboot box** | Power-cycle test without walking to the TV. |
+| **Verify boot (reboot + report)** | The one that closes the loop: reboots, waits for the box, then names the app that actually came up — AbleSign (done), Projectivy (its startup setting isn't pointed at AbleSign yet), or the Google TV home (the takeover didn't hold — press DEPLOY). |
 | **Open AbleSign install page on TV** | Jumps the TV straight to the Play Store page. |
+
+## If it still doesn't auto-launch
+
+Press **Check only**, and read the two lines that matter:
+
+- **`com.spocky.projengmenu` missing from the app list** → Projectivy isn't
+  installed (a factory reset wipes it). Press **DEPLOY**; it opens the Play
+  Store page on the TV, then finishes on the next press.
+- **home resolves to `...launcherx...`** → the boot takeover didn't hold.
+  Press **DEPLOY** with *Disable the Google TV home screen* ticked.
+- **home resolves to `...projengmenu...` but AbleSign never appears** → the
+  only remaining step, and no PC tool can do it: on the TV,
+  **Projectivy → Settings → General → launch app at startup → AbleSign**.
+
+**Verify boot** distinguishes all three for you in one press.
 
 ## Everything it repairs on its own
 

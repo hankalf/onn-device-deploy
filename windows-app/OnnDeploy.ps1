@@ -130,10 +130,15 @@ $btnApk.Size = New-Object Drawing.Size(100, 26); $form.Controls.Add($btnApk)
 $btnReboot = New-Object Windows.Forms.Button
 $btnReboot.Text = 'Reboot box'; $btnReboot.Location = New-Object Drawing.Point(227, 326)
 $btnReboot.Size = New-Object Drawing.Size(95, 26); $form.Controls.Add($btnReboot)
+$btnVerify = New-Object Windows.Forms.Button
+$btnVerify.Text = 'Verify boot (reboot + report)'
+$btnVerify.Location = New-Object Drawing.Point(544, 326)
+$btnVerify.Size = New-Object Drawing.Size(180, 26); $form.Controls.Add($btnVerify)
+
 $btnPlayAble = New-Object Windows.Forms.Button
-$btnPlayAble.Text = 'Open AbleSign install page on TV'
+$btnPlayAble.Text = 'AbleSign install page'
 $btnPlayAble.Location = New-Object Drawing.Point(328, 326)
-$btnPlayAble.Size = New-Object Drawing.Size(210, 26); $form.Controls.Add($btnPlayAble)
+$btnPlayAble.Size = New-Object Drawing.Size(150, 26); $form.Controls.Add($btnPlayAble)
 
 $chkOwner = New-Object Windows.Forms.CheckBox
 $chkOwner.Text = 'Try device-owner (fresh box, NO Google account) - Fully Kiosk only'
@@ -626,8 +631,8 @@ function Do-Deploy {
     Step 'Rebooting to prove it'
     Adb @('reboot') | Out-Null
     Say ''
-    Say 'Expect the board within 60-90s of the box coming back, remote untouched.' 'LightGreen'
-    Say 'Check Admin > Screen Fleet - the screen should show "online now".' 'LightGreen'
+    Say 'Rebooting. Press "Verify boot (reboot + report)" in ~90s and it will' 'LightGreen'
+    Say 'tell you exactly what came up on the TV - no walking over to check.' 'LightGreen'
   } catch {
     Fail "unexpected error: $($_.Exception.Message)"
   } finally {
@@ -691,6 +696,65 @@ function Do-InstallApk {
   if ($r -match 'Success') { Ok 'installed' } else { Fail $r.Trim() }
 }
 
+function Do-VerifyBoot {
+  if (-not (Ensure-Adb)) { return }
+  if (-not (Select-Device)) { return }
+  if (-not (Repair-Connection)) { return }
+  $log.Clear()
+  Step 'Reboot test - this takes about 90 seconds'
+  Info 'rebooting the box...'
+  Adb @('reboot') | Out-Null
+  Start-Sleep 12
+
+  # Wait for the box to answer again, then let the boot settle before judging.
+  $back = $false
+  for ($i = 0; $i -lt 40; $i++) {
+    Start-Sleep 3
+    if ($script:Serial -match ':\d+$') { Adb @('connect', $script:Serial) -NoSerial | Out-Null }
+    if ((Sh 'echo up').Trim() -eq 'up') { $back = $true; break }
+    Info "   ...waiting ($((($i+1)*3)+12)s)"
+  }
+  if (-not $back) {
+    Fail 'the box did not come back on the network within ~2 minutes.'
+    Info 'If it is showing a picture, its IP probably changed - check'
+    Info 'Settings > Network on the TV, or set a DHCP reservation.'
+    return
+  }
+  Ok 'box is back - letting the boot settle'
+  Start-Sleep 25
+
+  $top = ((Sh 'dumpsys activity activities') -split "`n" |
+          Where-Object { $_ -match 'topResumedActivity|mResumedActivity' } |
+          Select-Object -First 1)
+  Step 'What actually came up'
+  if ($top -match '([A-Za-z0-9_.]+)/([A-Za-z0-9_.$]+)') {
+    $pkg = $Matches[1]
+    Info "on screen: $pkg"
+    switch -Wildcard ($pkg) {
+      '*ablesign*' { Ok 'AbleSign launched by itself - this box is done.'; return }
+      '*projengmenu*' {
+        Warn 'Projectivy came up, but it did not start AbleSign.'
+        Info 'That last hop is a setting inside Projectivy that no PC tool can'
+        Info 'write. On the TV, once:'
+        Info '   Projectivy > Settings > General > launch app at startup > AbleSign'
+        Info 'Then press this button again to confirm.'
+        return
+      }
+      '*launcherx*' {
+        Warn 'The Google TV home came up - the boot takeover did not hold.'
+        Info 'Press DEPLOY (it will install/repair what is missing), then verify again.'
+        return
+      }
+      default { Warn "Something else owns the screen: $pkg" }
+    }
+  } else {
+    Warn 'could not read what is on screen'
+  }
+  Info ''
+  Info 'Tip: press Screenshot to see exactly what the TV is showing.'
+}
+
+$btnVerify.Add_Click({ Do-VerifyBoot })
 $btnReq.Add_Click({ [void](Show-Requirements) })
 $btnShot.Add_Click({ Do-Screenshot })
 $btnApk.Add_Click({ Do-InstallApk })
