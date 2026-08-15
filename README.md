@@ -69,6 +69,15 @@ Auto-detection only considers **non-system** apps matching
 matches — but `--pkg` is always the safer choice. Use `--list` to find the
 right name.
 
+## Windows app (no command line): `windows-app/`
+
+**`OnnDeploy.bat`** launches a point-and-click Windows app that does the whole
+job — finds the box (USB or network), fetches its own adb, removes the
+streaming apps, and sets **AbleSign to come up on every reboot** via the free
+Projectivy launcher, self-repairing what it can and explaining what it can't.
+See [windows-app/README.md](windows-app/README.md) for the before-you-begin
+checklist.
+
 ## Just make it work: `setup-kiosk.sh`
 
 One command, start to finish:
