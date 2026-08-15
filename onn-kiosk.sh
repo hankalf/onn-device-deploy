@@ -75,14 +75,26 @@ shell_q() {
 }
 
 # adb missing is the most common first-run failure — say so plainly instead of
-# letting it masquerade as an unreachable device.
+# letting it masquerade as an unreachable device. The expected Windows setup is
+# this script dropped into the unzipped platform-tools folder, and Git Bash
+# does not search the current directory for commands — so look next to the
+# script (and in the cwd) before giving up.
+if ! command -v adb >/dev/null 2>&1; then
+  HERE="$(cd "$(dirname "$0")" && pwd)"
+  for d in "$HERE" "$PWD"; do
+    if [ -x "$d/adb" ] || [ -f "$d/adb.exe" ]; then
+      PATH="$d:$PATH"
+      break
+    fi
+  done
+fi
 if ! command -v adb >/dev/null 2>&1; then
   echo "adb is not installed (or not on PATH)."
   echo
   echo "Install Android platform-tools and re-run:"
   echo "  https://developer.android.com/tools/releases/platform-tools"
-  echo "  - Windows: unzip, then run this script from Git Bash with the"
-  echo "    unzipped folder on PATH (or cd into it)."
+  echo "  - Windows: unzip, then put this script in the unzipped"
+  echo "    platform-tools folder and run it from Git Bash there."
   echo "  - macOS:   brew install android-platform-tools"
   echo "  - Linux:   apt install adb   (or your distro's equivalent)"
   exit 1
