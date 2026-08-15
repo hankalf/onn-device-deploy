@@ -69,6 +69,32 @@ Auto-detection only considers **non-system** apps matching
 matches — but `--pkg` is always the safer choice. Use `--list` to find the
 right name.
 
+## Just make it work: `setup-kiosk.sh`
+
+One command, start to finish:
+
+```bash
+./setup-kiosk.sh <ip> --url "https://your-board/screen/<token>"
+```
+
+It connects, repairs a box left with no working home screen, removes the Play
+Store build of Fully Kiosk (whose launcher capability Google strips out),
+downloads and installs the correct build, strips the streaming apps, takes over
+boot by every method in order of strength — device owner, the `HOME` role,
+legacy `set-home-activity`, then disabling the launchers that outrank it —
+pushes in the start URL, disables display sleep, reboots and verifies.
+
+Undo anything: `./setup-kiosk.sh <ip> --recover`
+
+**The one thing adb cannot do:** Fully Kiosk only offers itself as a launcher
+once **Kiosk Mode** is enabled inside the app, and that preference lives in the
+app's private storage. If the script hits that, it stops and prints the exact
+menu path (`Fully Kiosk > Settings > Kiosk Mode > ENABLE`); flip it with the
+remote and re-run the same command.
+
+The two scripts below are the older, more granular tools — `setup-kiosk.sh`
+supersedes both for the common case.
+
 ## Boot problems: run kiosk-doctor first
 
 `kiosk-doctor.sh` handles the whole "it won't boot into my kiosk app" mess in
