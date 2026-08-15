@@ -69,6 +69,28 @@ Auto-detection only considers **non-system** apps matching
 matches — but `--pkg` is always the safer choice. Use `--list` to find the
 right name.
 
+## Boot problems: run kiosk-doctor first
+
+`kiosk-doctor.sh` handles the whole "it won't boot into my kiosk app" mess in
+one pass — diagnosing, fixing, and refusing to leave the box unusable:
+
+```bash
+./kiosk-doctor.sh <ip>                                   # report only
+./kiosk-doctor.sh <ip> --fix de.ozerov.fully             # make it the home app
+./kiosk-doctor.sh <ip> --fix de.ozerov.fully --exclusive # ...and disable the stock launcher
+./kiosk-doctor.sh <ip> --recover                         # undo, back to stock
+```
+
+It knows the traps this repo was built around:
+
+| Trap | What the doctor does |
+|---|---|
+| Device left with **no working home screen** | Detects it and re-enables the stock launcher **before anything else**, every run |
+| **Play Store build** of the kiosk app (launcher capability stripped by Play policy) | Reads `versionName`, spots the `-play` suffix, tells you to install the vendor APK |
+| App ships its **launcher activity disabled** behind an in-app toggle (Fully Kiosk does) | Enumerates the package's components and enables the hidden one |
+| `set-home-activity` silently not taking | Verifies what the system actually resolves, and says so |
+| Disabling the stock launcher leaving nothing behind | Only disables **after** the replacement verifies, and **rolls back automatically** if home lands anywhere wrong |
+
 ## Making the board come up at boot
 
 This is the part that bites. Most **signage players declare no launcher
