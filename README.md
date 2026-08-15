@@ -87,7 +87,7 @@ It knows the traps this repo was built around:
 |---|---|
 | Device left with **no working home screen** | Detects it and re-enables the stock launcher **before anything else**, every run |
 | **Play Store build** of the kiosk app (launcher capability stripped by Play policy) | Reads `versionName`, spots the `-play` suffix, tells you to install the vendor APK |
-| App ships its **launcher activity disabled** behind an in-app toggle (Fully Kiosk does) | Enumerates the package's components and enables the hidden one |
+| App ships its **launcher activity disabled** behind an in-app toggle | Enumerates the package's components and enables the hidden one; if it can't, names the exact setting to flip |
 | `set-home-activity` silently not taking | Verifies what the system actually resolves, and says so |
 | Disabling the stock launcher leaving nothing behind | Only disables **after** the replacement verifies, and **rolls back automatically** if home lands anywhere wrong |
 
@@ -115,6 +115,11 @@ service:
 > `-play` (`adb shell dumpsys package de.ozerov.fully | grep versionName`) is
 > the tell; the script now flags it for you. Fix: `adb uninstall
 > de.ozerov.fully`, then install the downloaded APK.
+
+**One setting must be flipped on the TV first:** Fully Kiosk only registers as
+a home app once **Kiosk Mode** is enabled (Settings -> Kiosk Mode). That is an
+in-app preference, so adb cannot set it — without it the app is invisible to
+Android as a launcher and `--set-home` has nothing to bind to.
 
 Then set its **Start URL**. Rather than typing a long URL with a remote, turn on
 **Settings -> Remote Administration** on the TV and paste it from your PC at
