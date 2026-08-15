@@ -50,6 +50,15 @@ run.
 
 ---
 
+## The Requirements screen
+
+Press **Requirements** any time, and it appears automatically every time you
+press **DEPLOY** — so a box that was just factory reset can't get halfway
+through before you discover a missing step. It lists the order to do things on
+a fresh box, including which choice to make about the Google account (sign in
+for the Play Store route; skip it only if you'll sideload APKs and want
+device-owner mode).
+
 ## Deploying
 
 1. Double-click **`OnnDeploy.bat`**.
@@ -73,6 +82,37 @@ and AbleSign) is fully automatic.
 **Undo (back to stock):** the app's *Undo* button restores the Google TV home
 and reinstalls the removed apps. **Check only** reports the device's state
 without changing anything.
+
+## Every option in the app
+
+| Control | What it does |
+|---|---|
+| **Device list / Rescan** | Finds boxes on USB **and** network. onn sticks only answer over the network — the list says so when nothing is found. |
+| **IP + Connect** | Connects over the network; retries stale sessions and explains `unauthorized` (the prompt is on the TV). |
+| **Dashboard URL** | The `/screen/<token>` URL from Admin → Screen Fleet. Pushed into Fully Kiosk automatically when its Remote Administration is on. |
+| **AbleSign** | Free path. Hosts it with Projectivy so it starts on every boot, and enables the accessibility service that unlocks that feature. |
+| **Fully Kiosk** | Alternative. Kiosk/launcher mode needs a paid PLUS license per device; the app warns before using it. |
+| **Remove all streaming apps** | Strips 22 packages (Netflix, YouTube, Disney+, Apple TV, ESPN, Instagram, assistant, screensavers…), reversibly. |
+| **Disable the Google TV home screen** | Removes the Live/Apps rows so nothing competes for boot — only after the replacement verifies. |
+| **Try device-owner** | Strongest possible kiosk lock. Only works on a box where the Google account was skipped at setup, so it's off by default. |
+| **DEPLOY** | Shows Requirements, then runs the whole sequence and reboots to prove it. |
+| **Undo** | Back to stock: home restored, apps reinstalled. |
+| **Check only** | Full state report, changes nothing. |
+| **Requirements** | The pre-flight checklist on demand. |
+| **Screenshot** | Grabs what's on the TV right now and opens it — useful for "is it blank or is it not launching?". |
+| **Install APK…** | Sideload any APK (AbleSign, Projectivy, Fully) without the Play Store. |
+| **Reboot box** | Power-cycle test without walking to the TV. |
+| **Open AbleSign install page on TV** | Jumps the TV straight to the Play Store page. |
+
+## Everything it repairs on its own
+
+- Missing `adb` (downloads platform-tools), stale/offline sessions, unauthorized prompts
+- A box left with **no working home screen** — repaired before anything else, every run
+- **Play Store builds** of Fully Kiosk, whose launcher capability Google strips out
+- Launcher activities that ship **disabled** behind an in-app toggle
+- `set-home-activity` being ignored on Android 10+ — claims the **HOME role** instead
+- The **setup wizard** outranking third-party launchers once the stock home is gone
+- Display sleep, screensaver, and battery throttling of the player
 
 ## What the app handles by itself
 

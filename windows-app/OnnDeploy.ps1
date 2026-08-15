@@ -102,7 +102,7 @@ $form.Controls.Add($chkExcl)
 
 $btnGo = New-Object Windows.Forms.Button
 $btnGo.Text = 'DEPLOY'
-$btnGo.Location = New-Object Drawing.Point(20, 315); $btnGo.Size = New-Object Drawing.Size(200, 44)
+$btnGo.Location = New-Object Drawing.Point(20, 313); $btnGo.Size = New-Object Drawing.Size(200, 40)
 $btnGo.Font = New-Object Drawing.Font('Segoe UI', 11, [Drawing.FontStyle]::Bold)
 $btnGo.BackColor = [Drawing.Color]::FromArgb(29, 78, 216); $btnGo.ForeColor = 'White'
 $btnGo.FlatStyle = 'Flat'
@@ -110,17 +110,42 @@ $form.Controls.Add($btnGo)
 
 $btnUndo = New-Object Windows.Forms.Button
 $btnUndo.Text = 'Undo (back to stock)'
-$btnUndo.Location = New-Object Drawing.Point(232, 315); $btnUndo.Size = New-Object Drawing.Size(160, 44)
+$btnUndo.Location = New-Object Drawing.Point(232, 313); $btnUndo.Size = New-Object Drawing.Size(160, 40)
 $form.Controls.Add($btnUndo)
 
 $btnCheck = New-Object Windows.Forms.Button
 $btnCheck.Text = 'Check only'
-$btnCheck.Location = New-Object Drawing.Point(404, 315); $btnCheck.Size = New-Object Drawing.Size(110, 44)
+$btnCheck.Location = New-Object Drawing.Point(404, 313); $btnCheck.Size = New-Object Drawing.Size(110, 40)
 $form.Controls.Add($btnCheck)
 
+$btnReq = New-Object Windows.Forms.Button
+$btnReq.Text = 'Requirements'
+$btnReq.Location = New-Object Drawing.Point(526, 313); $btnReq.Size = New-Object Drawing.Size(120, 40)
+$form.Controls.Add($btnReq)
+
+# Utility row - the smaller tools built up over this project
+$btnShot = New-Object Windows.Forms.Button
+$btnShot.Text = 'Screenshot'; $btnShot.Location = New-Object Drawing.Point(20, 359)
+$btnShot.Size = New-Object Drawing.Size(95, 26); $form.Controls.Add($btnShot)
+$btnApk = New-Object Windows.Forms.Button
+$btnApk.Text = 'Install APK...'; $btnApk.Location = New-Object Drawing.Point(121, 359)
+$btnApk.Size = New-Object Drawing.Size(100, 26); $form.Controls.Add($btnApk)
+$btnReboot = New-Object Windows.Forms.Button
+$btnReboot.Text = 'Reboot box'; $btnReboot.Location = New-Object Drawing.Point(227, 359)
+$btnReboot.Size = New-Object Drawing.Size(95, 26); $form.Controls.Add($btnReboot)
+$btnPlayAble = New-Object Windows.Forms.Button
+$btnPlayAble.Text = 'Open AbleSign install page on TV'
+$btnPlayAble.Location = New-Object Drawing.Point(328, 359)
+$btnPlayAble.Size = New-Object Drawing.Size(210, 26); $form.Controls.Add($btnPlayAble)
+
+$chkOwner = New-Object Windows.Forms.CheckBox
+$chkOwner.Text = 'Try device-owner (fresh box, NO Google account) - Fully Kiosk only'
+$chkOwner.Location = New-Object Drawing.Point(420, 236); $chkOwner.Size = New-Object Drawing.Size(420, 22)
+$form.Controls.Add($chkOwner)
+
 $log = New-Object Windows.Forms.RichTextBox
-$log.Location = New-Object Drawing.Point(20, 372)
-$log.Size = New-Object Drawing.Size(800, 230)
+$log.Location = New-Object Drawing.Point(20, 394)
+$log.Size = New-Object Drawing.Size(800, 208)
 $log.ReadOnly = $true; $log.BackColor = [Drawing.Color]::FromArgb(24,24,27)
 $log.ForeColor = [Drawing.Color]::Gainsboro
 $log.Font = New-Object Drawing.Font('Consolas', 9)
@@ -138,6 +163,83 @@ function Ok($t)   { Say "   [ok] $t" 'LightGreen' }
 function Warn($t) { Say "   !! $t" 'Gold' }
 function Fail($t) { Say "   XX $t" 'Salmon' }
 function Info($t) { Say "   $t" }
+
+# --------------------------------------------------------- requirements gate -
+$script:ReqText = @'
+BEFORE YOU DEPLOY - one-time steps on the box. On a FRESH / RESET box do
+them in this order:
+
+ 1. Go through Google TV first-run setup (language, Wi-Fi).
+      - SIGN IN with a Google account if you will install AbleSign /
+        Projectivy from the Play Store (the normal route).
+      - SKIP the account only if you plan to sideload APKs with the
+        "Install APK..." button; skipping also unlocks device-owner
+        mode for Fully Kiosk (the strongest kiosk lock).
+
+ 2. Play Store: install ABLESIGN, open it once, pair it to your
+    AbleSign account so it shows the right screen.
+    (The "Open AbleSign install page on TV" button below can jump the
+    TV straight there once the box is connected.)
+
+ 3. Unlock Developer options:
+    Settings > System > About > click "Android TV OS build" 7 times.
+
+ 4. Settings > System > Developer options > USB DEBUGGING = ON.
+    (onn boxes only expose adb over the NETWORK - the USB port is
+    power/OTG only, so this app connects by IP.)
+
+ 5. Settings > Network & Internet: note the box IP. Strongly
+    recommended: give the box a DHCP RESERVATION in your router -
+    its IP changing mid-work cost us hours in testing.
+
+ 6. PC and box must be on the SAME network. Business Wi-Fi often has
+    AP/client isolation that silently blocks this - if Connect times
+    out with everything else right, put both on a phone hotspot for
+    the deploy, then move the box back.
+
+ 7. Keep the TV REMOTE nearby. Two prompts need it:
+      - "Allow USB debugging?" on first connect (tick Always allow)
+      - first deploy only: Projectivy > Settings > General >
+        launch app at startup > AbleSign
+
+After deploy the box reboots and lands in AbleSign in about a minute,
+and every later reboot or power cycle does the same on its own.
+'@
+
+function Show-Requirements([switch]$GateDeploy) {
+  $dlg = New-Object Windows.Forms.Form
+  $dlg.Text = 'Before you deploy - requirements'
+  $dlg.Size = New-Object Drawing.Size(640, 620)
+  $dlg.StartPosition = 'CenterParent'
+  $dlg.FormBorderStyle = 'FixedDialog'
+  $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+
+  $tb = New-Object Windows.Forms.TextBox
+  $tb.Multiline = $true; $tb.ReadOnly = $true; $tb.ScrollBars = 'Vertical'
+  $tb.Font = New-Object Drawing.Font('Consolas', 9)
+  $tb.Location = New-Object Drawing.Point(12, 12)
+  $tb.Size = New-Object Drawing.Size(600, 510)
+  $tb.Text = $script:ReqText
+  $dlg.Controls.Add($tb)
+
+  $okBtn = New-Object Windows.Forms.Button
+  $okBtn.Text = $(if ($GateDeploy) { 'All done - DEPLOY' } else { 'Close' })
+  $okBtn.Location = New-Object Drawing.Point(12, 534); $okBtn.Size = New-Object Drawing.Size(160, 32)
+  $okBtn.DialogResult = [Windows.Forms.DialogResult]::OK
+  $dlg.Controls.Add($okBtn)
+  if ($GateDeploy) {
+    $noBtn = New-Object Windows.Forms.Button
+    $noBtn.Text = 'Not yet'
+    $noBtn.Location = New-Object Drawing.Point(180, 534); $noBtn.Size = New-Object Drawing.Size(100, 32)
+    $noBtn.DialogResult = [Windows.Forms.DialogResult]::Cancel
+    $dlg.Controls.Add($noBtn)
+    $dlg.CancelButton = $noBtn
+  }
+  $dlg.AcceptButton = $okBtn
+  # De-select the text so the dialog opens without everything highlighted
+  $dlg.Add_Shown({ $okBtn.Focus() })
+  return ($dlg.ShowDialog($form) -eq [Windows.Forms.DialogResult]::OK)
+}
 
 # ------------------------------------------------------------ adb plumbing ---
 function Ensure-Adb {
@@ -447,6 +549,7 @@ function Do-Check {
 }
 
 function Do-Deploy {
+  if (-not (Show-Requirements -GateDeploy)) { return }
   $log.Clear()
   $btnGo.Enabled = $false
   try {
@@ -467,6 +570,17 @@ function Do-Deploy {
       Warn 'paid PLUS license (per device). Without one it will not stay set as'
       Warn 'the home app. The AbleSign option is free end to end.'
       if (-not (Install-Fully)) { return }
+      if ($chkOwner.Checked) {
+        Step 'Device owner (the strongest kiosk lock)'
+        if ((Sh 'dumpsys account') -match 'Account \{') {
+          Warn 'unavailable: a Google account is signed in on the box.'
+          Info 'It only works on a box where the account was SKIPPED during setup.'
+        } else {
+          $r = Sh "dpm set-device-owner $Fully/.MyDeviceAdminReceiver"
+          if ($r -match 'Success') { Ok 'Fully Kiosk is now the device owner' }
+          else { Warn "not granted: $($r.Trim())" }
+        }
+      }
       if (-not (Set-BootTarget $Fully)) { return }
       Set-StartUrl $url
     } else {
@@ -476,7 +590,9 @@ function Do-Deploy {
       Step 'AbleSign'
       if (-not (Pkg-Installed 'tv.ablesign.app')) {
         Fail 'AbleSign is not installed on this box.'
-        Info 'Install it from the Play Store on the TV, then press Deploy again.'
+        Info 'Opening its Play Store page on the TV - install it with the'
+        Info 'remote, open it once to pair it, then press Deploy again.'
+        Sh 'am start -a android.intent.action.VIEW -d market://details?id=tv.ablesign.app' | Out-Null
         return
       }
       Ok 'AbleSign present'
@@ -549,6 +665,47 @@ $btnConnect.Add_Click({
     if ($cboDev.Items[$i] -like "$ip*") { $cboDev.SelectedIndex = $i }
   }
   if ($r -match 'connected') { Ok 'connected' } else { Show-ConnectHelp }
+})
+function Do-Screenshot {
+  if (-not (Ensure-Adb)) { return }
+  if (-not (Select-Device)) { return }
+  if (-not (Repair-Connection)) { return }
+  Step 'Screenshot'
+  Sh 'screencap -p /sdcard/onndeploy-screen.png' | Out-Null
+  $file = Join-Path $Root ("screen-{0:yyyyMMdd-HHmmss}.png" -f (Get-Date))
+  Adb @('pull', '/sdcard/onndeploy-screen.png', $file) | Out-Null
+  Sh 'rm /sdcard/onndeploy-screen.png' | Out-Null
+  if (Test-Path $file) { Ok "saved: $file"; Invoke-Item $file }
+  else { Fail 'could not capture (some DRM/boot screens refuse capture)' }
+}
+
+function Do-InstallApk {
+  if (-not (Ensure-Adb)) { return }
+  if (-not (Select-Device)) { return }
+  $fd = New-Object Windows.Forms.OpenFileDialog
+  $fd.Filter = 'Android app (*.apk)|*.apk'
+  $fd.Title = 'Choose an APK to install on the box'
+  if ($fd.ShowDialog($form) -ne [Windows.Forms.DialogResult]::OK) { return }
+  if (-not (Repair-Connection)) { return }
+  Step ("Installing " + (Split-Path -Leaf $fd.FileName))
+  $r = Adb @('install', '-r', $fd.FileName)
+  if ($r -match 'Success') { Ok 'installed' } else { Fail $r.Trim() }
+}
+
+$btnReq.Add_Click({ [void](Show-Requirements) })
+$btnShot.Add_Click({ Do-Screenshot })
+$btnApk.Add_Click({ Do-InstallApk })
+$btnReboot.Add_Click({
+  if ((Ensure-Adb) -and (Select-Device) -and (Repair-Connection)) {
+    Step 'Rebooting'; Adb @('reboot') | Out-Null; Ok 'reboot sent'
+  }
+})
+$btnPlayAble.Add_Click({
+  if ((Ensure-Adb) -and (Select-Device) -and (Repair-Connection)) {
+    Step 'Opening the AbleSign Play Store page on the TV'
+    Sh 'am start -a android.intent.action.VIEW -d market://details?id=tv.ablesign.app' | Out-Null
+    Ok 'sent - install it with the remote, open it once to pair'
+  }
 })
 $btnGo.Add_Click({ Do-Deploy })
 $btnUndo.Add_Click({ Do-Undo })
