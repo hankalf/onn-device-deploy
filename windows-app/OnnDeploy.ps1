@@ -140,9 +140,14 @@ $btnPlayAble.Text = 'AbleSign install page'
 $btnPlayAble.Location = New-Object Drawing.Point(328, 326)
 $btnPlayAble.Size = New-Object Drawing.Size(150, 26); $form.Controls.Add($btnPlayAble)
 
+$chkForceProj = New-Object Windows.Forms.CheckBox
+$chkForceProj.Text = 'Force the Projectivy route (skip trying AbleSign alone)'
+$chkForceProj.Location = New-Object Drawing.Point(20, 248); $chkForceProj.Size = New-Object Drawing.Size(400, 22)
+$form.Controls.Add($chkForceProj)
+
 $chkOwner = New-Object Windows.Forms.CheckBox
-$chkOwner.Text = 'Try device-owner (fresh box, NO Google account) - Fully Kiosk only'
-$chkOwner.Location = New-Object Drawing.Point(20, 248); $chkOwner.Size = New-Object Drawing.Size(460, 22)
+$chkOwner.Text = 'Try device-owner (fresh box, no Google account)'
+$chkOwner.Location = New-Object Drawing.Point(430, 248); $chkOwner.Size = New-Object Drawing.Size(400, 22)
 $form.Controls.Add($chkOwner)
 
 $log = New-Object Windows.Forms.RichTextBox
@@ -507,6 +512,51 @@ function Set-BootTarget($pkg) {
   return $false
 }
 
+# Try to make an app start itself at boot with no launcher involved. Only two
+# mechanisms exist on Android: a HOME activity (checked elsewhere) or a
+# BOOT_COMPLETED receiver. This enables a dormant receiver, clears the battery
+# restrictions that silently kill one, and reports honestly if neither exists.
+function Try-StandaloneAutostart($pkg) {
+  Step "Can $pkg start itself at boot (no launcher)?"
+
+  $rx = (Sh 'cmd package query-receivers --brief -a android.intent.action.BOOT_COMPLETED') -split "`n" |
+        Where-Object { $_ -match [regex]::Escape($pkg) } | ForEach-Object { $_.Trim() }
+
+  if (-not $rx) {
+    # It may exist but be disabled - hunt the package's own components.
+    $cand = ((Sh "dumpsys package $pkg") | Select-String -Pattern "$([regex]::Escape($pkg))/[A-Za-z0-9_.`$]+" -AllMatches |
+             ForEach-Object { $_.Matches.Value } | Sort-Object -Unique |
+             Where-Object { $_ -match 'boot|start|receiv' })
+    foreach ($c in $cand) {
+      Sh "pm enable $c" | Out-Null
+      $rx = (Sh 'cmd package query-receivers --brief -a android.intent.action.BOOT_COMPLETED') -split "`n" |
+            Where-Object { $_ -match [regex]::Escape($pkg) } | ForEach-Object { $_.Trim() }
+      if ($rx) { Info "enabled dormant boot receiver: $c"; break }
+    }
+  }
+
+  if (-not $rx) {
+    Warn "$pkg has no boot receiver and no launcher activity."
+    Info 'Those are the only two ways an Android app can start itself at boot,'
+    Info 'so it genuinely cannot do it alone - that is an app limitation, not a'
+    Info 'device or tooling one. A launcher has to start it (Projectivy), OR use'
+    Info 'a player that can be the launcher itself.'
+    return $false
+  }
+
+  Ok "boot receiver found: $($rx -join ', ')"
+  Info 'clearing the restrictions that silently stop boot receivers...'
+  Sh "dumpsys deviceidle whitelist +$pkg" | Out-Null       # ignore Doze
+  Sh "cmd appops set $pkg RUN_IN_BACKGROUND allow" | Out-Null
+  Sh "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow" | Out-Null
+  Sh "cmd appops set --user 0 $pkg SYSTEM_ALERT_WINDOW allow" | Out-Null
+  Sh "am set-inactive $pkg false" | Out-Null               # out of app-standby
+  Sh "pm set-app-links --package $pkg 0 all" | Out-Null    # harmless if absent
+  Ok 'battery, background and overlay restrictions cleared'
+  Info 'Press "Verify boot" after this to see whether it actually comes up.'
+  return $true
+}
+
 function Set-StartUrl($url) {
   if (-not $url) { return }
   Step 'Start URL'
@@ -600,6 +650,21 @@ function Do-Deploy {
         return
       }
       Ok 'AbleSign present'
+
+      # Prefer AbleSign standing on its own - no second app to configure.
+      $solo = Try-StandaloneAutostart 'tv.ablesign.app'
+      if ($solo -and -not $chkForceProj.Checked) {
+        Harden
+        Step 'Rebooting to test AbleSign on its own'
+        Adb @('reboot') | Out-Null
+        Say ''
+        Say 'AbleSign has a boot receiver and its restrictions are cleared, so it' 'LightGreen'
+        Say 'may now start on its own. Press "Verify boot" in ~90s to find out.' 'LightGreen'
+        Say 'If it does NOT come up, tick "Force the Projectivy route" and deploy' 'Gold'
+        Say 'again - that route always works, at the cost of one setting on the TV.' 'Gold'
+        return
+      }
+
       if (-not (Pkg-Installed $Proj)) {
         Warn 'Projectivy Launcher is needed to start AbleSign at boot.'
         Info 'Opening its Play Store page on the TV - install it with the remote,'

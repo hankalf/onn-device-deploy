@@ -102,6 +102,7 @@ without changing anything.
 | **Fully Kiosk** | Alternative, for showing a plain URL instead. Kiosk/launcher mode needs a paid PLUS license per device; the app warns first, and asks for the URL only if you pick this. |
 | **Remove all streaming apps** | Strips 22 packages (Netflix, YouTube, Disney+, Apple TV, ESPN, Instagram, assistant, screensavers…), reversibly. |
 | **Disable the Google TV home screen** | Removes the Live/Apps rows so nothing competes for boot — only after the replacement verifies. |
+| **Force the Projectivy route** | Skips trying to make AbleSign start on its own and goes straight to the launcher-hosted route (which always works, at the cost of one setting on the TV). |
 | **Try device-owner** | Strongest possible kiosk lock. Only works on a box where the Google account was skipped at setup, so it's off by default. |
 | **DEPLOY** | Shows Requirements, then runs the whole sequence and reboots to prove it. |
 | **Undo** | Back to stock: home restored, apps reinstalled. |
@@ -112,6 +113,21 @@ without changing anything.
 | **Reboot box** | Power-cycle test without walking to the TV. |
 | **Verify boot (reboot + report)** | The one that closes the loop: reboots, waits for the box, then names the app that actually came up — AbleSign (done), Projectivy (its startup setting isn't pointed at AbleSign yet), or the Google TV home (the takeover didn't hold — press DEPLOY). |
 | **Open AbleSign install page on TV** | Jumps the TV straight to the Play Store page. |
+
+## Does AbleSign need Projectivy?
+
+Only if AbleSign can't start itself — and the app now checks rather than
+assuming. An Android app can start at boot in exactly two ways:
+
+1. **Be the home app** — AbleSign declares no launcher activity, so it can't.
+2. **Register a BOOT_COMPLETED receiver** — the app checks for one, enables it
+   if it ships dormant, and clears the Doze / background / app-standby limits
+   that silently stop boot receivers from firing.
+
+If AbleSign has that receiver, **Projectivy is not needed** and the deploy
+stops there — press **Verify boot** to confirm. If it has neither, no tool can
+route around it: something else has to start it, which is what the Projectivy
+route does. Tick **Force the Projectivy route** to skip straight to that.
 
 ## If it still doesn't auto-launch
 
