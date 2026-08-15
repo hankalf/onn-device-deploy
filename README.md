@@ -47,24 +47,43 @@ Needs `adb` on your PC ([platform-tools](https://developer.android.com/tools/rel
 # See every option
 ./onn-kiosk.sh
 
-# Full provisioning with a local APK
-./onn-kiosk.sh 192.168.1.57 --debloat --apk ablesign.apk --set-home
+# ALWAYS start here: see what's installed and what can act as launcher
+./onn-kiosk.sh 192.168.1.57 --list
 
-# No APK handy: open the player's Play Store page on the TV instead,
-# install with the remote, then re-run to finish
-./onn-kiosk.sh 192.168.1.57 --store com.ablesign.player
-./onn-kiosk.sh 192.168.1.57 --debloat --set-home
+# Full provisioning, naming the player explicitly (recommended)
+./onn-kiosk.sh 192.168.1.57 --debloat --pkg <player-package> --set-home
+
+# Bare-minimum kiosk: deeper strip + disable the Google TV home entirely
+# (only allowed once another launcher-capable app can take over boot)
+./onn-kiosk.sh 192.168.1.57 --debloat --minimal --pkg <player> --kill-launcher
 
 # Rehearse without touching the device
 ./onn-kiosk.sh 192.168.1.57 --debloat --set-home --dry-run
 
-# Undo
-./onn-kiosk.sh 192.168.1.57 --rebloat --restore-home
+# Undo everything
+./onn-kiosk.sh 192.168.1.57 --rebloat --restore-home --restore-launcher
 ```
 
-The script auto-detects the installed signage player (anything matching
-`able|fully|signage|kiosk`); name it explicitly with `--pkg` if detection
-picks wrong.
+Auto-detection only considers **non-system** apps matching
+`ablesign|fully|signage|kiosk|projectivy`, and stops to ask when more than one
+matches — but `--pkg` is always the safer choice. Use `--list` to find the
+right name.
+
+## If the player can't be the launcher
+
+`--set-home` only works on apps that declare a launcher activity, and many
+signage players don't. The script detects this and says so. Your options,
+best first:
+
+1. **The player's own start-on-boot** — enable it in the player's settings or
+   web dashboard. The "display over other apps" permission it needs is granted
+   by this script, which is the usual missing piece.
+2. **Projectivy Launcher** (free, in the TV Play Store) — launcher-capable and
+   has an "app to launch on startup" option. Install it, `--set-home` it (or
+   let `--kill-launcher` hand boot to it), and point its startup app at your
+   player.
+3. **Fully Kiosk Browser** as the player — it is launcher-capable itself, so
+   `--set-home` works directly.
 
 ## Notes
 
