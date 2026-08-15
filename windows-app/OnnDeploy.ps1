@@ -79,7 +79,7 @@ $form.Controls.Add($btnConnect)
 $null = New-Label '2. Player' 20 155 200 $true
 $null = New-Label 'AbleSign gets its content from your AbleSign cloud account - nothing to enter here.' 20 178 620 $false
 $rbAble = New-Object Windows.Forms.RadioButton
-$rbAble.Text = 'AbleSign  (free - recommended; auto-boots via Projectivy)'
+$rbAble.Text = 'AbleSign  (tries its own boot receiver first - free if it has one)'
 $rbAble.Location = New-Object Drawing.Point(20, 202); $rbAble.Size = New-Object Drawing.Size(390, 22)
 $rbAble.Checked = $true
 $form.Controls.Add($rbAble)
@@ -141,7 +141,7 @@ $btnPlayAble.Location = New-Object Drawing.Point(328, 326)
 $btnPlayAble.Size = New-Object Drawing.Size(150, 26); $form.Controls.Add($btnPlayAble)
 
 $chkForceProj = New-Object Windows.Forms.CheckBox
-$chkForceProj.Text = 'Force the Projectivy route (skip trying AbleSign alone)'
+$chkForceProj.Text = 'Force Projectivy route (its boot-launch is Premium, $7.49 one-time)'
 $chkForceProj.Location = New-Object Drawing.Point(20, 248); $chkForceProj.Size = New-Object Drawing.Size(400, 22)
 $form.Controls.Add($chkForceProj)
 
@@ -539,8 +539,12 @@ function Try-StandaloneAutostart($pkg) {
     Warn "$pkg has no boot receiver and no launcher activity."
     Info 'Those are the only two ways an Android app can start itself at boot,'
     Info 'so it genuinely cannot do it alone - that is an app limitation, not a'
-    Info 'device or tooling one. A launcher has to start it (Projectivy), OR use'
-    Info 'a player that can be the launcher itself.'
+    Info 'device or tooling one. Something else has to start it. Your options:'
+    Info '  * Projectivy Premium - $7.49 ONCE, covers every box on the same'
+    Info '    Google account. Cheapest for a fleet.'
+    Info '  * Fully Kiosk PLUS - licensed PER DEVICE, so pricier at scale.'
+    Info '  * A device built for signage (Amazon Signage Stick) - boots into its'
+    Info '    player natively, no launcher tricks and no add-on licence.'
     return $false
   }
 
@@ -667,6 +671,10 @@ function Do-Deploy {
 
       if (-not (Pkg-Installed $Proj)) {
         Warn 'Projectivy Launcher is needed to start AbleSign at boot.'
+        Warn 'HEADS UP: Projectivy is free, but its "launch app at startup"'
+        Warn 'feature is PREMIUM - $7.49 one-time, and that one purchase covers'
+        Warn 'every device signed in with the same Google account (unlike Fully'
+        Warn 'Kiosk, which licenses per device).'
         Info 'Opening its Play Store page on the TV - install it with the remote,'
         Info 'then press Deploy again.'
         Sh "am start -a android.intent.action.VIEW -d market://details?id=$Proj" | Out-Null
@@ -688,6 +696,8 @@ function Do-Deploy {
       }
       Warn 'ONE step left on the TV, with the remote (first deploy only):'
       Info '   Projectivy > Settings > General > launch app at startup > AbleSign'
+      Info 'That option is part of Projectivy PREMIUM ($7.49 one-time, bought'
+      Info 'inside the app; it then covers every box on the same Google account).'
       Info 'After that: every reboot goes straight into AbleSign, which shows'
       Info 'whatever screen you assigned it in the AbleSign dashboard.'
     }

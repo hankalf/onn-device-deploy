@@ -98,11 +98,11 @@ without changing anything.
 |---|---|
 | **Device list / Rescan** | Finds boxes on USB **and** network. onn sticks only answer over the network — the list says so when nothing is found. |
 | **IP + Connect** | Connects over the network; retries stale sessions and explains `unauthorized` (the prompt is on the TV). |
-| **AbleSign** | The default. Hosts it with Projectivy so it starts on every boot, and enables the accessibility service that unlocks that feature. Content comes from the AbleSign cloud — nothing to configure here. |
+| **AbleSign** | The default. Tries AbleSign's own boot receiver first (free); falls back to hosting it with Projectivy, whose boot-launch feature is $7.49 Premium. Content comes from the AbleSign cloud — nothing to configure here. |
 | **Fully Kiosk** | Alternative, for showing a plain URL instead. Kiosk/launcher mode needs a paid PLUS license per device; the app warns first, and asks for the URL only if you pick this. |
 | **Remove all streaming apps** | Strips 22 packages (Netflix, YouTube, Disney+, Apple TV, ESPN, Instagram, assistant, screensavers…), reversibly. |
 | **Disable the Google TV home screen** | Removes the Live/Apps rows so nothing competes for boot — only after the replacement verifies. |
-| **Force the Projectivy route** | Skips trying to make AbleSign start on its own and goes straight to the launcher-hosted route (which always works, at the cost of one setting on the TV). |
+| **Force the Projectivy route** | Skips trying to make AbleSign start on its own and goes straight to the launcher-hosted route. Always works — but needs Projectivy Premium ($7.49 one-time, all devices) plus one setting on the TV. |
 | **Try device-owner** | Strongest possible kiosk lock. Only works on a box where the Google account was skipped at setup, so it's off by default. |
 | **DEPLOY** | Shows Requirements, then runs the whole sequence and reboots to prove it. |
 | **Undo** | Back to stock: home restored, apps reinstalled. |
@@ -114,6 +114,18 @@ without changing anything.
 | **Verify boot (reboot + report)** | The one that closes the loop: reboots, waits for the box, then names the app that actually came up — AbleSign (done), Projectivy (its startup setting isn't pointed at AbleSign yet), or the Google TV home (the takeover didn't hold — press DEPLOY). |
 | **Open AbleSign install page on TV** | Jumps the TV straight to the Play Store page. |
 
+## What actually costs money (read this first)
+
+Making a *non-launcher* app start at boot is the one thing Android walls off,
+and every workaround has a price except one:
+
+| Route | Cost | Notes |
+|---|---|---|
+| **AbleSign's own boot receiver** | **Free** | Only if AbleSign ships one — the app checks and tells you. Nothing else needed. |
+| **Projectivy Premium** | **$7.49 one-time** | Its "launch app at startup" is a Premium feature. The purchase covers **every device on the same Google account**, so it's cheap for a fleet. |
+| **Fully Kiosk PLUS** | Paid **per device** | Kiosk/launcher mode is licensed per box — the expensive option at scale. |
+| **Amazon Signage Stick** | Hardware only | Boots into its signage player natively. No launcher tricks, no add-on licence. |
+
 ## Does AbleSign need Projectivy?
 
 Only if AbleSign can't start itself — and the app now checks rather than
@@ -124,10 +136,11 @@ assuming. An Android app can start at boot in exactly two ways:
    if it ships dormant, and clears the Doze / background / app-standby limits
    that silently stop boot receivers from firing.
 
-If AbleSign has that receiver, **Projectivy is not needed** and the deploy
-stops there — press **Verify boot** to confirm. If it has neither, no tool can
-route around it: something else has to start it, which is what the Projectivy
-route does. Tick **Force the Projectivy route** to skip straight to that.
+If AbleSign has that receiver, **Projectivy is not needed and nothing costs
+money** — the deploy stops there; press **Verify boot** to confirm. If it has
+neither, no tool can route around it: something else has to start it, and that
+something costs $7.49 once (Projectivy Premium) or per device (Fully Kiosk
+PLUS).
 
 ## If it still doesn't auto-launch
 
