@@ -122,7 +122,7 @@ and every workaround has a price except one:
 | Route | Cost | Notes |
 |---|---|---|
 | **AbleSign's own boot receiver** | **Free** | Only if AbleSign ships one — the app checks and tells you. Nothing else needed. |
-| **[Launch-On-Boot](https://github.com/ITVlab/Launch-On-Boot)** | **Free** (MIT) | A tiny open-source app whose *only* job is starting a chosen app at boot — exactly the feature the launchers charge for. On the Play Store and F-Droid. The app installs and configures it for you. |
+| **[Launch-On-Boot](https://github.com/ITVlab/Launch-On-Boot)** | **Free** (MIT) | A tiny open-source app whose *only* job is starting a chosen app at boot — exactly the feature the launchers charge for. The app opens its Store page on the TV, and its [releases page](https://github.com/ITVlab/Launch-On-Boot/releases/latest) in your browser as a sideload fallback, since some boxes no longer list this older app. Then it clears the Doze/background limits that silently stop boot receivers. |
 | **Projectivy Premium** | $7.49 one-time | Its "launch app at startup" is Premium. One purchase covers **every device on the same Google account**. |
 | **Fully Kiosk PLUS** | Paid **per device** | Kiosk/launcher mode is licensed per box — the expensive option at scale. |
 | **Amazon Signage Stick** | Hardware only | Boots into its signage player natively. No launcher tricks, no add-on licence. |

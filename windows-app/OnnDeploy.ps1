@@ -38,6 +38,9 @@ $script:Proj   = 'com.spocky.projengmenu'
 # Launch-On-Boot (ITVlab, MIT-licensed, free on Play + F-Droid): its entire job
 # is starting a chosen app at boot, which is the paid part of every launcher.
 $script:Lob    = 'news.androidtv.launchonboot'
+# Older project, so some TVs' Play Store no longer lists it - the releases page
+# is the sideload fallback, downloaded on the PC and pushed with Install APK.
+$script:LobApkPage = 'https://github.com/ITVlab/Launch-On-Boot/releases/latest'
 $script:Fully  = 'de.ozerov.fully'
 $script:FullyApkUrl = 'https://www.fully-kiosk.com/files/2026/08/Fully-Kiosk-Browser-v1.61.1.apk'
 
@@ -695,6 +698,13 @@ function Do-Deploy {
         Info 'and Fully Kiosk charge for. It is free on the Play Store.'
         Info 'Opening its page on the TV - install it, then press DEPLOY again.'
         Sh "am start -a android.intent.action.VIEW -d market://details?id=$Lob" | Out-Null
+        Info ''
+        Warn 'It is an older app, so some boxes no longer list it in the Store.'
+        Info 'If the TV shows "not found", use the releases page opening in your'
+        Info 'browser now: download the .apk, then press "Install APK..." here.'
+        try { Start-Process $LobApkPage -ErrorAction Stop | Out-Null } catch {
+          Info "  $LobApkPage"
+        }
         Info ''
         Info 'Prefer the paid launcher instead? Tick "Force Projectivy route".'
         return
