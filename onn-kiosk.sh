@@ -74,11 +74,43 @@ shell_q() {
   if [ "$DRY" = 1 ]; then run shell "$@"; else adb -s "$SERIAL" shell "$@" >/dev/null 2>&1; fi
 }
 
+# adb missing is the most common first-run failure — say so plainly instead of
+# letting it masquerade as an unreachable device.
+if ! command -v adb >/dev/null 2>&1; then
+  echo "adb is not installed (or not on PATH)."
+  echo
+  echo "Install Android platform-tools and re-run:"
+  echo "  https://developer.android.com/tools/releases/platform-tools"
+  echo "  - Windows: unzip, then run this script from Git Bash with the"
+  echo "    unzipped folder on PATH (or cd into it)."
+  echo "  - macOS:   brew install android-platform-tools"
+  echo "  - Linux:   apt install adb   (or your distro's equivalent)"
+  exit 1
+fi
+
 echo "== Connecting to $SERIAL"
-adb connect "$SERIAL" >/dev/null 2>&1
+CONNECT_OUT=$(adb connect "$SERIAL" 2>&1)
 if ! adb -s "$SERIAL" shell true >/dev/null 2>&1 && [ "$DRY" = 0 ]; then
-  echo "Cannot reach the device. Check the IP, that USB debugging is enabled,"
-  echo "and accept the 'Allow USB debugging?' prompt on the TV, then re-run."
+  echo "Cannot reach the device."
+  echo "   adb connect said: $CONNECT_OUT"
+  echo "   adb devices sees:"
+  adb devices | sed 's/^/     /'
+  echo
+  STATE=$(adb devices | awk -v s="$SERIAL" '$1==s {print $2}')
+  case "$STATE" in
+    unauthorized)
+      echo "-> The 'Allow USB debugging?' prompt is on the TV right now."
+      echo "   Accept it (tick 'Always allow'), then re-run." ;;
+    offline)
+      echo "-> Stale session. Run: adb disconnect $SERIAL   then re-run." ;;
+    *)
+      echo "-> Nothing answered on $SERIAL. Check, in order:"
+      echo "   1. USB debugging is ON (Settings -> System -> Developer options)."
+      echo "   2. The IP is current (Settings -> Network & Internet on the box)."
+      echo "   3. Your PC and the box are on the SAME network - business Wi-Fi"
+      echo "      often blocks device-to-device traffic (AP isolation). If so,"
+      echo "      join both to a phone hotspot, provision, then switch back." ;;
+  esac
   exit 1
 fi
 [ "$DRY" = 0 ] && echo "   model: $(adb -s "$SERIAL" shell getprop ro.product.model | tr -d '\r')"
