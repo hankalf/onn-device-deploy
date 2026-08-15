@@ -83,10 +83,10 @@ device-owner mode).
    - **AbleSign** → done, that box is finished and it cost nothing.
    - **anything else** → it records that route as failed for this box and
      immediately sets up the next free route, **Launch-On-Boot**, in the same
-     press. If that app isn't on the box it opens its Store page on the TV and
-     its [releases page](https://github.com/ITVlab/Launch-On-Boot/releases/latest)
-     in your browser (it's an older app some boxes no longer list) — install it,
-     press **DEPLOY**, then choose **AbleSign** inside it with the remote.
+     press. That app isn't in the TV's Store any more, so the PC **downloads it
+     and installs it over Wi-Fi** through the connection it already has — no
+     Store, no USB stick, no remote. Then choose **AbleSign** inside it with the
+     remote (that one choice lives in the app's private storage).
 6. Press **Verify boot** again. Repeat until it reports AbleSign. Finally, pull
    the power and plug it back in to confirm it survives a real outage.
 
@@ -116,7 +116,7 @@ without changing anything.
 | **Check only** | Full state report, changes nothing. |
 | **Requirements** | The pre-flight checklist on demand. |
 | **Screenshot** | Grabs what's on the TV right now and opens it — useful for "is it blank or is it not launching?". |
-| **Install APK…** | Sideload any APK (AbleSign, Projectivy, Fully) without the Play Store. |
+| **Install APK…** | Sideload any APK (AbleSign, Projectivy, Fully) over the same Wi-Fi connection — no Play Store, no USB stick. |
 | **Reboot box** | Power-cycle test without walking to the TV. |
 | **Verify boot (reboot + report)** | The one that closes the loop: reboots, waits for the box, then names the app that actually came up. If it isn't AbleSign, it marks that route failed for this box and **moves on to the next free route in the same press** — no going back to DEPLOY to try again. |
 | **Open AbleSign install page on TV** | Jumps the TV straight to the Play Store page. |
@@ -129,7 +129,7 @@ and every workaround has a price except one:
 | Route | Cost | Notes |
 |---|---|---|
 | **AbleSign's own boot receiver** | **Free** | Only if AbleSign ships one — the app checks and tells you. Nothing else needed. |
-| **[Launch-On-Boot](https://github.com/ITVlab/Launch-On-Boot)** | **Free** (MIT) | A tiny open-source app whose *only* job is starting a chosen app at boot — exactly the feature the launchers charge for. The app opens its Store page on the TV, and its [releases page](https://github.com/ITVlab/Launch-On-Boot/releases/latest) in your browser as a sideload fallback, since some boxes no longer list this older app. Then it clears the Doze/background limits that silently stop boot receivers. |
+| **[Launch-On-Boot](https://github.com/ITVlab/Launch-On-Boot)** | **Free** (MIT) | A tiny open-source app whose *only* job is starting a chosen app at boot — exactly the feature the launchers charge for. It's no longer listed in the TV's Store, so the app finds the current build, downloads it, and **installs it over Wi-Fi** itself, then clears the Doze/background limits that silently stop boot receivers. |
 | **Projectivy Premium** | $7.49 one-time | Its "launch app at startup" is Premium. One purchase covers **every device on the same Google account**. |
 | **Fully Kiosk PLUS** | Paid **per device** | Kiosk/launcher mode is licensed per box — the expensive option at scale. |
 | **Amazon Signage Stick** | Hardware only | Boots into its signage player natively. No launcher tricks, no add-on licence. |
@@ -160,10 +160,13 @@ Press **Check only**. It prints the box's boot-route memory — which methods
 have been tried here and which one is currently set up — plus the lines that
 matter:
 
-- **`news.androidtv.launchonboot` in the app list, but AbleSign still doesn't
+- **a `...launchonboot` package in the app list, but AbleSign still doesn't
   come up** → the app is installed but hasn't been *told* what to start. Open
   it on the TV and choose AbleSign; that choice lives in its private storage,
   so no PC tool can write it.
+- **the TV Store says "item not found"** → expected, and no longer a problem:
+  the app installs Launch-On-Boot from the PC over Wi-Fi instead of asking the
+  Store for it.
 - **`com.spocky.projengmenu` missing from the app list** → Projectivy isn't
   installed (a factory reset wipes it). Set **Boot method** to Projectivy and
   press **DEPLOY**; it opens the Play Store page on the TV, then finishes on

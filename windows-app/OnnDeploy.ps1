@@ -701,22 +701,102 @@ function Route-Solo {
   return $true
 }
 
+function Installed-List {
+  return @((Sh 'pm list packages -3') -split "`n" |
+           ForEach-Object { ($_ -replace 'package:', '').Trim() } |
+           Where-Object { $_ })
+}
+
+function Find-Lob {
+  # The published package id could differ from the constant (forks, rebuilds),
+  # so match on the name rather than assuming.
+  $m = @(Installed-List | Where-Object { $_ -match 'launch.?on.?boot' })
+  if ($m.Count) { $script:Lob = $m[0]; return $true }
+  return $false
+}
+
+function Get-LobApkUrl {
+  # Resolve the download at run time rather than pinning a URL that will rot.
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  try {
+    $rel = Invoke-RestMethod 'https://api.github.com/repos/ITVlab/Launch-On-Boot/releases/latest' `
+             -Headers @{ 'User-Agent' = 'OnnDeploy' } -TimeoutSec 30
+    $apk = @($rel.assets | Where-Object { $_.name -like '*.apk' })
+    if ($apk.Count) {
+      Info "found $($rel.tag_name) on GitHub: $($apk[0].name)"
+      return $apk[0].browser_download_url
+    }
+  } catch { }
+  try {   # F-Droid, if it carries this package
+    $p = Invoke-RestMethod "https://f-droid.org/api/v1/packages/$Lob" -TimeoutSec 30
+    if ($p.suggestedVersionCode) {
+      Info "found build $($p.suggestedVersionCode) on F-Droid"
+      return "https://f-droid.org/repo/$($Lob)_$($p.suggestedVersionCode).apk"
+    }
+  } catch { }
+  return $null
+}
+
+function Install-Lob {
+  # The box is already on adb over Wi-Fi, so the PC can push the APK straight
+  # across - no Store listing, no remote, no USB stick.
+  Step 'Installing Launch-On-Boot over Wi-Fi'
+  $apk = Join-Path $Store 'launch-on-boot.apk'
+  if (-not (Test-Path $apk)) {
+    Info 'looking for the current build...'
+    $url = Get-LobApkUrl
+    if (-not $url) {
+      Fail 'could not find a download for it automatically.'
+      Info 'Opening its releases page in your browser - download the .apk, then'
+      Info 'press "Install APK..." here (that also installs over Wi-Fi).'
+      try { Start-Process $LobApkPage -ErrorAction Stop | Out-Null } catch {
+        Info "  $LobApkPage"
+      }
+      return $false
+    }
+    try {
+      Info 'downloading to this PC...'
+      if (-not (Test-Path $Store)) { New-Item -ItemType Directory -Path $Store -Force | Out-Null }
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+      Invoke-WebRequest $url -OutFile $apk -UseBasicParsing -TimeoutSec 120
+    } catch {
+      Fail "download failed: $($_.Exception.Message)"
+      Info "Get it manually from $LobApkPage and use the Install APK button."
+      if (Test-Path $apk) { Remove-Item $apk -Force -ErrorAction SilentlyContinue }
+      return $false
+    }
+  }
+  Info 'pushing it to the box over the network...'
+  $before = @(Installed-List)
+  $r = Adb @('install', '-r', $apk)
+  if ($r -match 'Success') {
+    Ok 'installed - no Play Store needed'
+    # Trust the box over a hard-coded id: whatever package just appeared IS it.
+    $new = @(Installed-List | Where-Object { $before -notcontains $_ })
+    if ($new.Count -eq 1 -and $new[0] -ne $script:Lob) {
+      Info "it registered as $($new[0])"
+      $script:Lob = $new[0]
+    }
+    return $true
+  }
+  Fail ("install failed: " + $r.Trim())
+  if ($r -match 'INSTALL_FAILED_UPDATE_INCOMPATIBLE|SIGNATURE') {
+    Info 'A different build is already on the box. Uninstall it on the TV'
+    Info '(Settings > Apps) and press DEPLOY again.'
+  }
+  # A bad or partial file must not be reused on the next attempt.
+  Remove-Item $apk -Force -ErrorAction SilentlyContinue
+  return $false
+}
+
 function Route-Lob {
   Step 'Launch-On-Boot (free, MIT-licensed - its only job is this)'
-  if (-not (Pkg-Installed $Lob)) {
-    Info 'Not on the box yet. Opening its page on the TV - install it with the'
-    Info 'remote, then press DEPLOY again.'
-    Sh "am start -a android.intent.action.VIEW -d market://details?id=$Lob" | Out-Null
-    Info ''
-    Warn 'It is an older app, so some boxes no longer list it in the Store.'
-    Info 'If the TV says "not found", use the releases page opening in your'
-    Info 'browser now: download the .apk, then press "Install APK..." here.'
-    try { Start-Process $LobApkPage -ErrorAction Stop | Out-Null } catch {
-      Info "  $LobApkPage"
-    }
-    return $false
+  if (-not ((Pkg-Installed $Lob) -or (Find-Lob))) {
+    Info 'Not on the box yet - installing it from here rather than the TV Store,'
+    Info 'which no longer lists this older app on some boxes.'
+    if (-not (Install-Lob)) { return $false }
   }
-  Ok 'installed'
+  Ok "installed: $Lob"
   Sh "dumpsys deviceidle whitelist +$Lob" | Out-Null       # ignore Doze
   Sh "cmd appops set $Lob RUN_IN_BACKGROUND allow" | Out-Null
   Sh "cmd appops set $Lob RUN_ANY_IN_BACKGROUND allow" | Out-Null
