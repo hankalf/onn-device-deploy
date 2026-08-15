@@ -17,6 +17,10 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 $ErrorActionPreference = 'Stop'
 $script:Root    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:Tools   = Join-Path $Root 'platform-tools'
+# Anything downloaded lands here, not beside the script: re-extracting the repo
+# ZIP gives a brand-new folder, and nobody should pay for the download twice.
+$script:Store   = Join-Path $env:LOCALAPPDATA 'OnnDeploy'
+$script:AdbMemo = Join-Path $Store 'adb-path.txt'
 $script:Adb     = $null
 $script:Serial  = $null
 $script:Cancel  = $false
@@ -259,30 +263,96 @@ function Show-Requirements([switch]$GateDeploy) {
 }
 
 # ------------------------------------------------------------ adb plumbing ---
-function Ensure-Adb {
-  # Prefer a copy next to the app, then anything on PATH, then fetch Google's.
-  $local = Join-Path $Tools 'adb.exe'
-  if (Test-Path $local) { $script:Adb = $local; return $true }
-  $onPath = Get-Command adb.exe -ErrorAction SilentlyContinue
-  if ($onPath) { $script:Adb = $onPath.Source; return $true }
-
-  Step 'Installing platform-tools (one time)'
+function Test-Adb([string]$path) {
+  # Present is not the same as working: a half-extracted or 32-bit-blocked
+  # adb.exe would fail every later command with a confusing error instead.
+  if (-not $path -or -not (Test-Path $path)) { return $false }
   try {
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = $path; $psi.Arguments = 'version'
+    $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $p = [Diagnostics.Process]::Start($psi)
+    $out = $p.StandardOutput.ReadToEnd(); $p.StandardError.ReadToEnd() | Out-Null
+    $p.WaitForExit()
+    return ($p.ExitCode -eq 0 -and $out -match 'Android Debug Bridge')
+  } catch { return $false }
+}
+
+function Find-Adb {
+  # Every place adb realistically already sits on a Windows PC, cheapest first.
+  $repoRoot = Split-Path -Parent $Root
+  $c = @()
+  if (Test-Path $AdbMemo) {                       # what worked last time
+    try { $c += (Get-Content $AdbMemo -TotalCount 1).Trim() } catch { }
+  }
+  $c += (Join-Path $Tools 'adb.exe')              # unzipped beside this app
+  $c += (Join-Path $Store 'platform-tools\adb.exe')   # fetched by an earlier run
+  if ($repoRoot) { $c += (Join-Path $repoRoot 'platform-tools\adb.exe') }
+  $onPath = Get-Command adb.exe -ErrorAction SilentlyContinue
+  if ($onPath) { $c += $onPath.Source }           # PATH, Scoop/Choco shims
+  $c += @(
+    "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe",   # Android Studio
+    "$env:ProgramFiles\Android\android-sdk\platform-tools\adb.exe",
+    "${env:ProgramFiles(x86)}\Android\android-sdk\platform-tools\adb.exe",
+    "$env:ProgramData\chocolatey\lib\adb\tools\platform-tools\adb.exe",
+    "$env:USERPROFILE\scoop\apps\adb\current\adb.exe",
+    "$env:USERPROFILE\Downloads\platform-tools\adb.exe",      # manual grab
+    "$env:USERPROFILE\Desktop\platform-tools\adb.exe",
+    'C:\platform-tools\adb.exe',
+    'C:\adb\adb.exe'
+  )
+  foreach ($p in ($c | Where-Object { $_ } | Select-Object -Unique)) {
+    if (Test-Adb $p) { return $p }
+  }
+  return $null
+}
+
+function Ensure-Adb {
+  if ($script:Adb -and (Test-Path $script:Adb)) { return $true }  # settled already
+
+  $found = Find-Adb
+  if ($found) {
+    $script:Adb = $found
+    Remember-Adb $found
+    Ok "using the adb already on this PC: $found"
+    return $true
+  }
+
+  Step 'No adb on this PC - fetching it once'
+  $dest = Join-Path $Store 'platform-tools\adb.exe'
+  try {
+    if (-not (Test-Path $Store)) { New-Item -ItemType Directory -Path $Store -Force | Out-Null }
     $zip = Join-Path $env:TEMP 'platform-tools.zip'
     Info 'downloading from Google...'
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest 'https://dl.google.com/android/repository/platform-tools-latest-windows.zip' `
       -OutFile $zip -UseBasicParsing
-    Expand-Archive -Path $zip -DestinationPath $Root -Force
+    Expand-Archive -Path $zip -DestinationPath $Store -Force
     Remove-Item $zip -Force
-    if (Test-Path $local) { $script:Adb = $local; Ok 'adb installed'; return $true }
+    if (Test-Adb $dest) {
+      $script:Adb = $dest
+      Remember-Adb $dest
+      Ok "adb installed to $dest (kept, so this never downloads again)"
+      return $true
+    }
+    Fail 'the download finished but adb.exe would not run.'
   } catch {
     Fail "could not download adb: $($_.Exception.Message)"
-    Info 'Fix: download platform-tools manually and put adb.exe beside this app:'
-    Info '  https://developer.android.com/tools/releases/platform-tools'
-    return $false
   }
+  Info 'Fix: download platform-tools manually and unzip it beside this app,'
+  Info 'so that platform-tools\adb.exe sits next to OnnDeploy.bat:'
+  Info '  https://developer.android.com/tools/releases/platform-tools'
   return $false
+}
+
+function Remember-Adb([string]$path) {
+  # So the next run skips the search entirely - including after the repo ZIP is
+  # re-downloaded into a fresh folder.
+  try {
+    if (-not (Test-Path $Store)) { New-Item -ItemType Directory -Path $Store -Force | Out-Null }
+    Set-Content -Path $AdbMemo -Value $path -Encoding ASCII
+  } catch { }
 }
 
 function Adb {

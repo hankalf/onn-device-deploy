@@ -9,8 +9,11 @@ strips the streaming apps, and diagnoses and repairs errors on its own.
 cloud account assigns to that device — this app only handles the device side:
 getting AbleSign to start, every time.
 
-No install needed on the PC — it even fetches its own copy of `adb` on first
-run.
+No install needed on the PC. It finds an `adb` you already have — beside the
+app, on your PATH, in an Android Studio SDK, Chocolatey/Scoop, or a
+`platform-tools` folder in Downloads/Desktop/`C:\` — and only downloads one if
+there genuinely isn't one, keeping it in `%LOCALAPPDATA%\OnnDeploy` so it never
+downloads twice even after you re-extract this ZIP.
 
 ---
 
@@ -20,11 +23,12 @@ run.
 
 1. Download this repo as a ZIP (green **Code** button → Download ZIP) and
    extract it anywhere, e.g. the Desktop.
-2. That's it. Windows 10/11 has PowerShell built in, and the app downloads
-   `adb` by itself on first run. (If your network blocks downloads, grab
+2. That's it. Windows 10/11 has PowerShell built in, and the app sorts out
+   `adb` itself — reusing one you already have, or downloading it once if you
+   don't. (If your network blocks downloads, grab
    [platform-tools](https://developer.android.com/tools/releases/platform-tools)
-   yourself and unzip it into the `windows-app` folder so `platform-tools\adb.exe`
-   sits next to the app.)
+   yourself and unzip it anywhere obvious — next to the app, or in Downloads,
+   Desktop, or `C:\platform-tools` — and it will be found.)
 
 ### On each TV box (5 minutes, once per box)
 
@@ -163,7 +167,9 @@ Press **Check only**, and read the two lines that matter:
 
 ## Everything it repairs on its own
 
-- Missing `adb` (downloads platform-tools), stale/offline sessions, unauthorized prompts
+- `adb`: finds an existing one in ~10 usual places, checks it actually runs,
+  and downloads platform-tools only if there is none; stale/offline sessions
+  and unauthorized prompts
 - A box left with **no working home screen** — repaired before anything else, every run
 - **Play Store builds** of Fully Kiosk, whose launcher capability Google strips out
 - Launcher activities that ship **disabled** behind an in-app toggle
@@ -173,7 +179,8 @@ Press **Check only**, and read the two lines that matter:
 
 ## What the app handles by itself
 
-- Downloads/locates `adb`; finds devices over USB **and** network
+- Locates `adb` (downloading it only as a last resort); finds devices over USB
+  **and** network
 - Reconnects stale sessions; explains `unauthorized` / unreachable states
 - Repairs a box left with no working home screen (before doing anything else)
 - Removes 20+ streaming/bloat apps (reversibly)
