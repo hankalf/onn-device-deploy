@@ -69,15 +69,36 @@ Auto-detection only considers **non-system** apps matching
 matches — but `--pkg` is always the safer choice. Use `--list` to find the
 right name.
 
-## If the player can't be the launcher
+## Making the board come up at boot
 
-Most signage players — AbleSign included — declare no launcher activity, so
-they can never own boot themselves. `--set-home` detects this and says so.
-The reliable fix is to hand boot to a real launcher and let *it* start the
-player:
+This is the part that bites. Most **signage players declare no launcher
+activity** — AbleSign does not — so they can never own boot themselves, and
+their own "start on boot" settings are unreliable on Google TV.
+
+### Recommended: Fully Kiosk Browser as the player
+
+If the screen just shows a web page (a dashboard URL), Fully Kiosk is both the
+player *and* launcher-capable — one app, no launcher chaining, no accessibility
+service:
 
 ```bash
-# 1. install Projectivy Launcher (free) — opens its Store page on the TV
+# APK from https://www.fully-kiosk.com/ (not in the TV Play Store)
+./onn-kiosk.sh <ip> --apk fully-kiosk.apk --pkg de.ozerov.fully --set-home
+```
+
+Then set its **Start URL**. Rather than typing a long URL with a remote, turn on
+**Settings -> Remote Administration** on the TV and paste it from your PC at
+`http://<ip>:2323`. Also enable **Keep Screen On** and **Web Auto Reload**.
+
+Boot chain: power on -> Fully Kiosk (it is the launcher) -> page. Done.
+
+### Alternative: a real launcher starts your player
+
+If you must keep a signage player that cannot be a launcher, hand boot to
+Projectivy Launcher and have it start the player:
+
+```bash
+# 1. install Projectivy (free) — opens its Store page on the TV
 ./onn-kiosk.sh <ip> --store com.spocky.projengmenu
 #    ...install it with the remote, and WAIT for it to finish...
 
@@ -85,24 +106,17 @@ player:
 ./onn-kiosk.sh <ip> --pkg tv.ablesign.app \
                     --home-pkg com.spocky.projengmenu --set-home
 
-# 3. on the TV, once: Projectivy settings -> launch at startup -> AbleSign
+# 3. on the TV, once: Projectivy settings -> General -> launch app at startup
 ```
 
-The script verifies what the system actually resolves as home afterwards, and
-tells you to add `--kill-launcher` if the Google TV home is somehow still
-winning.
+`--home-pkg` also enables Projectivy's **accessibility service**, which is how
+it implements launch-at-startup. Its first-run wizard normally grants that and
+is trivially skipped with a remote — without it, the startup option is missing
+or does nothing. That single detail is the usual reason this route "silently
+fails".
 
-**Why step 3 needs step 2's accessibility grant:** Projectivy implements
-"launch app at startup" through an accessibility service, which is normally
-granted by its first-run wizard — trivially skipped with a TV remote, and
-without it the startup option does nothing. `--home-pkg` enables that service
-over ADB (appending to the existing list, never replacing it), so the option
-actually works when you set it.
-
-Other options: enable the player's own start-on-boot (the overlay permission
-it needs is granted by this script, which is usually the missing piece), or
-use **Fully Kiosk Browser** as the player — it is launcher-capable, so
-`--set-home` works on it directly.
+`--set-home` verifies what the system actually resolves as home afterwards, and
+says to add `--kill-launcher` if the Google TV home is somehow still winning.
 
 ## Notes
 
