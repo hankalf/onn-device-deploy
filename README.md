@@ -88,7 +88,8 @@ It knows the traps this repo was built around:
 | Device left with **no working home screen** | Detects it and re-enables the stock launcher **before anything else**, every run |
 | **Play Store build** of the kiosk app (launcher capability stripped by Play policy) | Reads `versionName`, spots the `-play` suffix, tells you to install the vendor APK |
 | App ships its **launcher activity disabled** behind an in-app toggle | Enumerates the package's components and enables the hidden one; if it can't, names the exact setting to flip |
-| `set-home-activity` silently not taking | Verifies what the system actually resolves, and says so |
+| `set-home-activity` silently not taking on Android 10+ | Claims `android.app.role.HOME` via RoleManager (the modern path) and keeps the legacy call as a fallback |
+| The **TV setup wizard** outranking third-party launchers (priority 1 vs 0) once the stock launcher is gone | Detects it grabbing home and disables it too |
 | Disabling the stock launcher leaving nothing behind | Only disables **after** the replacement verifies, and **rolls back automatically** if home lands anywhere wrong |
 
 ## Making the board come up at boot

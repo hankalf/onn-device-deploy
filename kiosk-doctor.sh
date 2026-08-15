@@ -103,6 +103,8 @@ if ! usable_home "$CUR"; then
   echo "!! No usable home screen right now (home resolves to: ${CUR:-nothing})."
   echo "   Re-enabling the stock launcher so the box is usable again."
   shq_ pm enable --user 0 "$GTV"
+  shq_ pm enable --user 0 com.google.android.tungsten.setupwraith
+  shq_ cmd role add-role-holder android.app.role.HOME "$GTV"
   shq_ cmd package set-home-activity "$GTV/.home.HomeActivity"
   sleep 1
   CUR=$(home_now)
@@ -113,6 +115,8 @@ if [ "$RECOVER" = 1 ]; then
   echo
   echo "== Recovering to stock"
   shq_ pm enable --user 0 "$GTV"
+  shq_ pm enable --user 0 com.google.android.tungsten.setupwraith
+  shq_ cmd role add-role-holder android.app.role.HOME "$GTV"
   shq_ cmd package set-home-activity "$GTV/.home.HomeActivity"
   sleep 1
   echo "   home is now: $(home_now)"
@@ -201,40 +205,63 @@ fi
 echo "   launcher activity: $TARGET_HOME"
 
 # --- 4. Set home and VERIFY ------------------------------------------------
+# Android 10+ decides the home app through RoleManager. `set-home-activity` is
+# the legacy path: it reports no error but is ignored on modern Google TV, so
+# claim the role first and keep the legacy call as a fallback for old boxes.
+claim_home() {
+  shq_ cmd role add-role-holder android.app.role.HOME "$FIX_PKG"
+  shq_ cmd package set-home-activity "$TARGET_HOME"
+  sleep 1
+}
+is_target() { [ "${1#"$FIX_PKG"/}" != "$1" ]; }
+
 echo
 echo "== Setting home to $TARGET_HOME"
-shq_ cmd package set-home-activity "$TARGET_HOME"
-sleep 1
+claim_home
 NOW=$(home_now)
 echo "   home is now: $NOW"
 
-case "$NOW" in
-  "$FIX_PKG"/*) echo "   verified." ;;
-  *)
-    echo "   NOT verified — the system still prefers $NOW."
-    if [ "$EXCLUSIVE" = 0 ]; then
-      echo "   Re-run with --exclusive to disable the stock launcher so there is"
-      echo "   no competition."
-      exit 1
-    fi ;;
-esac
+if is_target "$NOW"; then
+  echo "   verified."
+elif [ "$EXCLUSIVE" = 0 ]; then
+  echo "   NOT verified — the system still prefers $NOW."
+  echo "   Re-run with --exclusive to disable the launchers that outrank it."
+  exit 1
+else
+  echo "   not yet — removing the competition below."
+fi
 
 # --- 5. Optionally remove the competition ---------------------------------
-if [ "$EXCLUSIVE" = 1 ]; then
+if [ "$EXCLUSIVE" = 1 ] && ! is_target "$(home_now)"; then
   echo
   echo "== Disabling the stock launcher (Live/Apps rows included)"
   shq_ pm disable-user --user 0 "$GTV"
-  sleep 1
+  claim_home
   NOW=$(home_now)
   echo "   home is now: $NOW"
-  if ! usable_home "$NOW" || [ "${NOW#"$FIX_PKG"/}" = "$NOW" ]; then
-    echo "   That is not $FIX_PKG — rolling back so the box stays usable."
+
+  # The TV setup wizard registers a HOME activity at priority 1, above every
+  # third-party launcher, so it grabs home the moment the stock one goes away.
+  # It has done its job long before a box becomes a wall display.
+  if ! is_target "$NOW" && [ "${NOW#*setupwraith}" != "$NOW" ]; then
+    SETUP="${NOW%%/*}"
+    echo "   the setup wizard ($SETUP) outranks it — disabling that too"
+    shq_ pm disable-user --user 0 "$SETUP"
+    claim_home
+    NOW=$(home_now)
+    echo "   home is now: $NOW"
+  fi
+
+  if ! is_target "$NOW"; then
+    echo "   Still not $FIX_PKG — rolling back so the box stays usable."
+    [ -n "${SETUP:-}" ] && shq_ pm enable --user 0 "$SETUP"
     shq_ pm enable --user 0 "$GTV"
+    shq_ cmd role add-role-holder android.app.role.HOME "$GTV"
     shq_ cmd package set-home-activity "$GTV/.home.HomeActivity"
     echo "   restored: $(home_now)"
     exit 1
   fi
-  echo "   verified — $FIX_PKG is the only home app."
+  echo "   verified — $FIX_PKG is the home app."
 fi
 
 # --- 6. Kiosk hygiene ------------------------------------------------------
