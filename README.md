@@ -92,6 +92,13 @@ The script verifies what the system actually resolves as home afterwards, and
 tells you to add `--kill-launcher` if the Google TV home is somehow still
 winning.
 
+**Why step 3 needs step 2's accessibility grant:** Projectivy implements
+"launch app at startup" through an accessibility service, which is normally
+granted by its first-run wizard — trivially skipped with a TV remote, and
+without it the startup option does nothing. `--home-pkg` enables that service
+over ADB (appending to the existing list, never replacing it), so the option
+actually works when you set it.
+
 Other options: enable the player's own start-on-boot (the overlay permission
 it needs is granted by this script, which is usually the missing piece), or
 use **Fully Kiosk Browser** as the player — it is launcher-capable, so

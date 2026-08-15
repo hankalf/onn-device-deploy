@@ -149,6 +149,36 @@ if ! adb -s "$SERIAL" shell true >/dev/null 2>&1; then
 fi
 echo "   model: $(qshell getprop ro.product.model)"
 
+# Enable a package's accessibility service. Projectivy needs this for its
+# "launch app at startup" feature (it is granted by its first-run wizard, which
+# is easy to skip with a remote — and without it the option does nothing).
+enable_accessibility() {
+  local pkg="$1"
+  local svc
+  svc=$(qshell cmd package query-services --brief \
+          -a android.accessibilityservice.AccessibilityService \
+        | grep "^ *$pkg/" | sed 's/^[[:space:]]*//' | head -1)
+  if [ -z "$svc" ]; then
+    echo "   $pkg declares no accessibility service (nothing to enable)"
+    return 0
+  fi
+  local existing
+  existing=$(qshell settings get secure enabled_accessibility_services)
+  case "$existing" in
+    *"$svc"*) echo "   accessibility already enabled for $pkg" ; return 0 ;;
+  esac
+  # Append rather than replace — clobbering the list would disable any other
+  # accessibility service the device relies on.
+  local merged="$svc"
+  case "$existing" in
+    ""|null) ;;
+    *) merged="$existing:$svc" ;;
+  esac
+  shell_q settings put secure enabled_accessibility_services "$merged"
+  shell_q settings put secure accessibility_enabled 1
+  echo "   accessibility enabled: $svc"
+}
+
 # Every app that can act as the HOME screen, one component per line.
 home_capable() {
   qshell cmd package query-activities --brief -a android.intent.action.MAIN \
@@ -293,6 +323,12 @@ if [ "$SET_HOME" = 1 ]; then
   if [ -n "$HOME_COMP" ]; then
     echo "== Making $HOME_COMP the launcher (Home + every boot land in it)"
     shell cmd package set-home-activity "$HOME_COMP"
+    # A launcher standing in for the player needs accessibility to be able to
+    # start it at boot.
+    if [ -n "$HOME_PKG" ]; then
+      echo "   enabling $HOME_PKG's launch-at-startup capability"
+      enable_accessibility "$HOME_PKG"
+    fi
     if [ "$DRY" = 0 ]; then
       sleep 1
       NOW=$(qshell cmd package resolve-activity --brief -a android.intent.action.MAIN \
@@ -303,6 +339,12 @@ if [ "$SET_HOME" = 1 ]; then
         *) echo "   WARNING: the system still resolves home elsewhere. Try"
            echo "   adding --kill-launcher to disable the Google TV home." ;;
       esac
+      if [ -n "$HOME_PKG" ]; then
+        echo
+        echo "   ONE manual step left, on the TV with the remote:"
+        echo "     $HOME_PKG settings -> General -> launch app at startup"
+        echo "     -> $PKG"
+      fi
     fi
   else
     echo "== $TARGET is NOT launcher-capable — cannot be set as home."
