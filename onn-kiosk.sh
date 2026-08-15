@@ -184,6 +184,10 @@ BLOAT=(
   com.cbs.ott
   tv.pluto.android
   com.tubitv
+  com.apple.atve.androidtv.appletv
+  com.espn.score_center
+  com.google.android.youtube.tvunplugged
+  com.instagram.airwave
 )
 
 # Deeper strip for dedicated kiosks: voice/search, screensavers, accessibility
