@@ -47,6 +47,16 @@ $script:Lob    = 'news.androidtv.launchonboot'
 $script:LobApkPage = 'https://github.com/ITVlab/Launch-On-Boot/releases/latest'
 $script:Fully  = 'de.ozerov.fully'
 $script:FullyApkUrl = 'https://www.fully-kiosk.com/files/2026/08/Fully-Kiosk-Browser-v1.61.1.apk'
+# FreeKiosk (MIT, free): does what Projectivy charges for and Fully Kiosk
+# licenses per device - locks the box to one app and relaunches it. Every
+# setting can be written over adb, so nothing here needs the remote.
+$script:FK        = 'com.freekiosk'
+$script:FKAdmin   = 'com.freekiosk/.DeviceAdminReceiver'
+$script:FKApkPage = 'https://github.com/RushB-fr/freekiosk/releases/latest'
+$script:FKApi     = 'https://api.github.com/repos/RushB-fr/freekiosk/releases/latest'
+# FreeKiosk requires a PIN to save config and to reach its settings on the TV
+# (5 taps, then this). Fixed so it is always recoverable; printed on every run.
+$script:FKPin     = '1234'
 
 # ---------------------------------------------------------------- UI ---------
 $form               = New-Object Windows.Forms.Form
@@ -162,6 +172,7 @@ $cboRoute.Location = New-Object Drawing.Point(110, 246); $cboRoute.Size = New-Ob
   'Auto - free routes first, remembers what already failed',
   "AbleSign's own boot receiver only",
   'Launch-On-Boot (free helper app)',
+  'FreeKiosk (free, locks the box to AbleSign)',
   'Projectivy (its boot-launch is Premium, $7.49 one-time)'
 ))
 $cboRoute.SelectedIndex = 0
@@ -635,11 +646,14 @@ function Try-StandaloneAutostart($pkg) {
     Info 'so it genuinely cannot do it alone - that is an app limitation, not a'
     Info 'device or tooling one. Something else has to start it. Your options:'
     Info '  * Launch-On-Boot - FREE, MIT-licensed, does only this one job.'
+    Info '  * FreeKiosk - FREE, MIT-licensed. Takes the screen itself and starts'
+    Info '    AbleSign from the foreground, which Android does not block.'
+    Info '  * The PC watchdog button below - FREE. Needs this PC left on.'
     Info '  * Projectivy Premium - $7.49 ONCE, covers every box on the same'
     Info '    Google account. Cheapest for a fleet.'
     Info '  * Fully Kiosk PLUS - licensed PER DEVICE, so pricier at scale.'
-    Info '  * A device built for signage (Amazon Signage Stick) - boots into its'
-    Info '    player natively, no launcher tricks and no add-on licence.'
+    Info '  * A device built for signage (Amazon Signage Stick) - boots into'
+    Info '    AbleSign natively; it is one of the players it supports.'
     return $false
   }
 
@@ -691,7 +705,8 @@ function Get-Route {
   switch ($cboRoute.SelectedIndex) {
     1 { return 'solo' }
     2 { return 'lob' }
-    3 { return 'proj' }
+    3 { return 'fk' }
+    4 { return 'proj' }
     default { return 'auto' }
   }
 }
@@ -797,6 +812,162 @@ function Install-Lob {
   # A bad or partial file must not be reused on the next attempt.
   Remove-Item $apk -Force -ErrorAction SilentlyContinue
   return $false
+}
+
+# --------------------------------------------------------------- FreeKiosk ---
+# The free equivalent of the paid launchers. It matters because of HOW the boot
+# launch is allowed: Android refuses to let a background app put another app on
+# screen, but an app holding SYSTEM_ALERT_WINDOW is exempt, and an app that is
+# already on screen is exempt. So FreeKiosk starts (exempt via the overlay
+# permission we grant below), takes the screen, and from there starting AbleSign
+# is an ordinary foreground launch that nothing blocks.
+function Find-FK {
+  $m = @(Installed-List | Where-Object { $_ -match 'freekiosk' })
+  if ($m.Count) { $script:FK = $m[0]; return $true }
+  return $false
+}
+
+function Get-FKApkUrl {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  try {
+    $rel = Invoke-RestMethod $FKApi -Headers @{ 'User-Agent' = 'OnnDeploy' } -TimeoutSec 30
+    $apk = @($rel.assets | Where-Object { $_.name -like '*.apk' })
+    if ($apk.Count) {
+      Info "found $($rel.tag_name) on GitHub: $($apk[0].name)"
+      return $apk[0].browser_download_url
+    }
+  } catch { }
+  return $null
+}
+
+function Install-FK {
+  Step 'Installing FreeKiosk over Wi-Fi'
+  $apk = Join-Path $Store 'freekiosk.apk'
+  if (-not (Test-Path $apk)) {
+    Info 'looking for the current build...'
+    $url = Get-FKApkUrl
+    if (-not $url) {
+      Fail 'could not find a download for it automatically.'
+      Info 'Opening its releases page - download the .apk, then press'
+      Info '"Install APK..." here (that installs over Wi-Fi too).'
+      try { Start-Process $FKApkPage -ErrorAction Stop | Out-Null } catch { Info "  $FKApkPage" }
+      return $false
+    }
+    try {
+      Info 'downloading to this PC...'
+      if (-not (Test-Path $Store)) { New-Item -ItemType Directory -Path $Store -Force | Out-Null }
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+      Invoke-WebRequest $url -OutFile $apk -UseBasicParsing -TimeoutSec 180
+    } catch {
+      Fail "download failed: $($_.Exception.Message)"
+      Info "Get it from $FKApkPage and use the Install APK button."
+      if (Test-Path $apk) { Remove-Item $apk -Force -ErrorAction SilentlyContinue }
+      return $false
+    }
+  }
+  Info 'pushing it to the box over the network...'
+  $before = @(Installed-List)
+  $r = Adb @('install', '-r', $apk)
+  if ($r -match 'Success') {
+    Ok 'installed - no Play Store needed'
+    $new = @(Installed-List | Where-Object { $before -notcontains $_ })
+    if ($new.Count -eq 1 -and $new[0] -ne $script:FK) {
+      Info "it registered as $($new[0])"
+      $script:FK = $new[0]
+    }
+    return $true
+  }
+  Fail ("install failed: " + $r.Trim())
+  if ($r -match 'INSTALL_FAILED_UPDATE_INCOMPATIBLE|SIGNATURE') {
+    Info 'A different build is already on the box. Uninstall it on the TV'
+    Info '(Settings > Apps) and press DEPLOY again.'
+  }
+  Remove-Item $apk -Force -ErrorAction SilentlyContinue
+  return $false
+}
+
+function FK-DeviceOwner {
+  # The strongest lock, and the only one that survives a user poking Settings.
+  # It is also the one thing here that a factory reset may be needed to undo,
+  # so it is never done unless the box is asked for it explicitly.
+  Step 'Device owner (the strongest lock)'
+  if ((Sh 'dumpsys account') -match 'Account \{') {
+    Warn 'unavailable: a Google account is signed in on the box.'
+    Info 'Device owner can only be set on a box where the account was SKIPPED'
+    Info 'during setup. To use it: factory reset, skip the Google account,'
+    Info 'turn USB debugging back on, then run this again with the box ticked.'
+    Info 'Everything else on this route still works without it.'
+    return $false
+  }
+  $r = Sh "dpm set-device-owner $FKAdmin"
+  if ($r -match 'Success') { Ok 'FreeKiosk is now the device owner'; return $true }
+  Warn "not granted: $($r.Trim())"
+  return $false
+}
+
+function Route-FK {
+  Step 'FreeKiosk (free, MIT-licensed - the paid launchers without the fee)'
+  if (-not ((Pkg-Installed $FK) -or (Find-FK))) {
+    if (-not (Install-FK)) { return $false }
+  }
+  Ok "installed: $FK"
+
+  # This is the whole reason the route can work where Launch-On-Boot did not.
+  Sh "cmd appops set $FK SYSTEM_ALERT_WINDOW allow" | Out-Null
+  Sh "appops set $FK SYSTEM_ALERT_WINDOW allow" | Out-Null
+  $sawOn = ((Sh "cmd appops get $FK SYSTEM_ALERT_WINDOW") -match 'allow')
+  if ($sawOn) {
+    Ok 'granted draw-over-other-apps - the documented exemption from the'
+    Ok 'background-launch block that stopped the last route'
+  } else {
+    Warn 'could not grant draw-over-other-apps. This route may hit the same'
+    Warn 'block; if it does, the PC watchdog is the fallback that always works.'
+  }
+  Sh "dumpsys deviceidle whitelist +$FK" | Out-Null
+  Sh "cmd appops set $FK RUN_IN_BACKGROUND allow" | Out-Null
+  Sh "cmd appops set $FK RUN_ANY_IN_BACKGROUND allow" | Out-Null
+  Sh "am set-inactive $FK false" | Out-Null
+  Ok 'battery and background restrictions cleared'
+
+  if ($chkOwner.Checked) { FK-DeviceOwner | Out-Null }
+
+  # If it offers a home activity, take home as well - a launcher is always
+  # allowed to start apps, which makes the boot launch doubly covered. Done by
+  # hand rather than through Set-BootTarget, which rolls the box back to stock
+  # on failure; here a missing home activity is expected, not a failure.
+  $fkHome = Home-List | Where-Object { $_ -like "$FK/*" } | Select-Object -First 1
+  if ($fkHome) {
+    Info "it offers a home activity ($fkHome) - claiming home as well"
+    Claim-Home $FK $fkHome
+    if ((Home-Now) -like "$FK/*") { Ok 'FreeKiosk owns home' }
+    else { Info 'home did not move; the overlay permission above still covers us' }
+  } else {
+    Info 'it does not register as a launcher - relying on the overlay exemption'
+  }
+
+  Step 'Pointing FreeKiosk at AbleSign'
+  # Single quotes inside: the whole string is re-quoted on its way to adb.
+  $cfg = "am start -n $FK/.MainActivity --es lock_package 'tv.ablesign.app' " +
+         "--es pin '$FKPin' --ez auto_start true"
+  $out = Sh $cfg
+  if ($out -match 'Error|Exception') {
+    Fail ("FreeKiosk did not accept the settings: " + $out.Trim())
+    Info 'Open FreeKiosk on the TV and set "External App" to AbleSign by hand,'
+    Info "then turn on auto-start. Settings there: 5 taps, PIN $FKPin."
+    return $false
+  }
+  Ok "locked to AbleSign, auto-start on, PIN $FKPin"
+  Set-Attempted 'fk'
+  Harden
+  Info ''
+  Warn "WRITE THIS DOWN: the FreeKiosk PIN is $FKPin"
+  Info 'On the TV, 5 taps then that PIN opens its settings. Undo here also'
+  Info 'reverses it from the PC, so you are not locked out either way.'
+  Step 'Rebooting to prove it'
+  Adb @('reboot') | Out-Null
+  Say ''
+  Say 'Press "Verify boot (reboot + report)" in ~90s to see what came up.' 'LightGreen'
+  return $true
 }
 
 function Route-Lob {
@@ -991,9 +1162,11 @@ function Do-Deploy {
           }
         }
         'lob'  { Route-Lob  | Out-Null }
+        'fk'   { Route-FK   | Out-Null }
         'proj' { Route-Proj | Out-Null }
         default {
           # Auto: cheapest first, skipping anything this box already failed.
+          # Every free route is exhausted before anything that costs money.
           $done = $false
           if (Route-Failed 'solo') {
             Info 'Skipping AbleSign own boot receiver - already failed on this box.'
@@ -1004,12 +1177,20 @@ function Do-Deploy {
           if (-not $done) {
             if (Route-Failed 'lob') {
               Info 'Skipping Launch-On-Boot - already failed on this box.'
-              Warn 'Both free routes are exhausted here. Trying Projectivy, whose'
-              Warn 'launch-at-startup is Premium ($7.49 one-time, every box on the'
-              Warn 'same Google account). Undo reverses everything it changes.'
+            } else {
+              $done = Route-Lob
+            }
+          }
+          if (-not $done) {
+            if (Route-Failed 'fk') {
+              Info 'Skipping FreeKiosk - already failed on this box.'
+              Warn 'Every free on-box route is exhausted here. Trying Projectivy,'
+              Warn 'whose launch-at-startup is Premium ($7.49 one-time, every box'
+              Warn 'on the same Google account). Undo reverses what it changes.'
+              Warn 'The PC watchdog below is still free, if this PC can stay on.'
               Route-Proj | Out-Null
             } else {
-              Route-Lob | Out-Null
+              $done = Route-FK
             }
           }
         }
@@ -1029,6 +1210,23 @@ function Do-Undo {
   if (-not (Repair-Connection)) { return }
   Step 'Restoring the box to stock'
   State-Clear          # the box is stock again, so what failed on it no longer applies
+  # Kiosk locks come off first: leaving one on while handing home back to Google
+  # TV is how a box ends up showing a locked app it will not let go of.
+  if ((Pkg-Installed $FK) -or (Find-FK)) {
+    Info 'releasing the FreeKiosk lock...'
+    Sh "am force-stop $FK" | Out-Null
+    $r = Sh "dpm remove-active-admin $FKAdmin"
+    if ($r -match 'Success') {
+      Ok 'device owner removed'
+    } elseif ((Sh 'dumpsys device_policy') -match [regex]::Escape($FK)) {
+      Warn 'FreeKiosk is still the device owner and adb cannot clear it.'
+      Warn 'That is an Android rule, not this app: a device owner is removable'
+      Warn 'only by the app itself or by a factory reset. The box will still'
+      Warn 'boot to Google TV once FreeKiosk is uninstalled below.'
+    }
+    Sh "pm uninstall --user 0 $FK" | Out-Null
+    Ok 'FreeKiosk removed'
+  }
   Restore-Stock
   foreach ($p in $Bloat) { Sh "cmd package install-existing $p" | Out-Null }
   Start-Sleep 1
@@ -1179,6 +1377,50 @@ function Diagnose-Lob {
   Info 'this firmware and what is left costs money (Projectivy Premium $7.49'
   Info 'once, Fully Kiosk PLUS per device) - or the Amazon Signage Stick.'
   Sh "monkey -p $Lob -c android.intent.category.LAUNCHER 1" | Out-Null
+  return 'pending'
+}
+
+function Diagnose-FK {
+  Step 'Why FreeKiosk did not bring AbleSign up'
+  if (-not ((Pkg-Installed $FK) -or (Find-FK))) {
+    Fail 'It is not on the box at all - so nothing was ever going to start.'
+    Info 'Set Boot method to FreeKiosk and press DEPLOY; it installs over Wi-Fi.'
+    return 'pending'
+  }
+  Ok "installed: $FK"
+  $saw = (Sh "cmd appops get $FK SYSTEM_ALERT_WINDOW")
+  if ($saw -notmatch 'allow') {
+    Warn 'it does NOT hold draw-over-other-apps, which is the one thing that'
+    Warn 'exempts it from the background-launch block. Granting it now...'
+    Sh "cmd appops set $FK SYSTEM_ALERT_WINDOW allow" | Out-Null
+    Info 'Press "Verify boot" again - that may be all it needed.'
+    return 'pending'
+  }
+  Ok 'it holds draw-over-other-apps (the background-launch exemption)'
+  if (Stopped-State $FK) {
+    Warn 'it is in the stopped state, so it receives no boot broadcast.'
+    Info 'Opening it now to take it out of that state...'
+    Sh "monkey -p $FK -c android.intent.category.LAUNCHER 1" | Out-Null
+    Info 'Then press Verify again.'
+    return 'pending'
+  }
+  Ok 'it is not stopped, so it is eligible for the boot broadcast'
+  $bal = @(Bal-Lines | Where-Object { $_ -match [regex]::Escape($FK) -or $_ -match 'ablesign' })
+  if ($bal.Count) {
+    Explain-Bal $bal
+    Info ''
+    Warn 'This route held the documented exemption and was still refused, so the'
+    Warn 'block on this firmware is stricter than the public rules describe.'
+    Warn 'No free on-box route is left. Use the PC watchdog, or a paid launcher.'
+    return 'fatal'
+  }
+  Warn 'It ran, was allowed to launch, and AbleSign still did not end up on'
+  Warn 'screen. Re-applying its settings in case they did not save...'
+  $cfg = "am start -n $FK/.MainActivity --es lock_package 'tv.ablesign.app' " +
+         "--es pin '$FKPin' --ez auto_start true"
+  Sh $cfg | Out-Null
+  Info "Check on the TV too: 5 taps, PIN $FKPin, confirm the locked app is"
+  Info 'AbleSign and auto-start is on. Then press Verify again.'
   return 'pending'
 }
 
@@ -1477,6 +1719,7 @@ function Advance-Route {
   switch ($att) {
     'solo' { $verdict = Diagnose-Solo }
     'lob'  { $verdict = Diagnose-Lob }
+    'fk'   { $verdict = Diagnose-FK }
     'proj' { $verdict = Diagnose-Proj }
     default {
       Info 'No route has been set up on this box yet.'
@@ -1500,14 +1743,27 @@ function Advance-Route {
       }
     }
     elseif ($att -eq 'lob') {
-      # The free on-box route is out. Do not silently jump to the $7.49 one -
+      Info ''
+      if ((Get-Route) -eq 'auto') {
+        Info 'Moving on to FreeKiosk - also free, but it takes the screen itself'
+        Info 'and starts AbleSign from the foreground, which is not blocked.'
+        Route-FK | Out-Null
+      } else {
+        Info 'Set Boot method to FreeKiosk (or Auto) and press DEPLOY - it is'
+        Info 'free and works differently enough to be worth the try.'
+      }
+    }
+    elseif ($att -eq 'fk') {
+      # Every free on-box route is out. Do not silently jump to the $7.49 one -
       # the PC watchdog is free and does strictly more, so it goes first.
       Info ''
-      Info 'The free on-box route is done here. What is left:'
+      Info 'Every free on-box route is done here. What is left:'
       Info '  1. "Auto-restart watchdog (PC)" below - free. This PC re-launches'
       Info '     AbleSign whenever the box loses it. Needs the PC left on.'
       Info '  2. Projectivy Premium - $7.49 once, covers every box on the same'
       Info '     Google account, and needs no PC. Set Boot method to Projectivy.'
+      Info '  3. The Amazon Signage Stick boots into AbleSign natively - AbleSign'
+      Info '     is one of its supported players, so nothing above is needed.'
     }
   } else {
     Info ''

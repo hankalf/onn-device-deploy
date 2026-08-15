@@ -130,9 +130,69 @@ It knows the traps this repo was built around:
 
 ## Making the board come up at boot
 
-This is the part that bites. Most **signage players declare no launcher
-activity** — AbleSign does not — so they can never own boot themselves, and
-their own "start on boot" settings are unreliable on Google TV.
+This is the part that bites, and there are **two** separate walls, not one.
+
+**Wall 1 — most signage players declare no launcher activity.** AbleSign does
+not (`cmd package query-activities -c android.intent.category.HOME` lists only
+launcherx, setupwraith and FallbackHome), so it can never own boot itself.
+
+**Wall 2 — Android 12+ blocks background activity launches.** This is the one
+that wastes days, because every tool involved reports success. A boot helper
+receives `BOOT_COMPLETED`, calls `startActivity`, and the OS silently throws it
+away. On an onn HD stick running Android 14 the log reads:
+
+```
+W/ActivityTaskManager: Background activity launch blocked
+  [callingPackage: news.androidtv.launchonboot; callingUid: 10113;
+   callingUidProcState: SERVICE; callingUidHasAnyVisibleWindow: false;
+   ... cmp=tv.ablesign.app/.MainActivity ]
+E/ActivityTaskManager: Abort background activity starts from 10113
+I/ActivityTaskManager: START u0 {...} from uid 10113 (BAL_BLOCK) result code=102
+```
+
+Note that a blocked start still prints `START u0` — read only that line and you
+will conclude it worked. The `BAL_BLOCK` and non-zero result code are the tell.
+
+[Google's BAL documentation](https://developer.android.com/guide/components/activities/background-starts)
+lists the exemptions. Three matter here:
+
+- the app **has a visible window** — so an app already on screen may launch others
+- the app holds **`SYSTEM_ALERT_WINDOW`** — grantable over adb with
+  `cmd appops set <pkg> SYSTEM_ALERT_WINDOW allow`
+- the launch comes from **the launcher app**
+
+Everything below is a way of landing on one of those three. Shell (uid 2000) is
+also exempt, which is why an adb-driven launch always succeeds:
+
+```
+I/ActivityTaskManager: START u0 {...} from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+```
+
+### Routes, cheapest first
+
+| Route | Cost | How it beats the wall | Catch |
+|---|---|---|---|
+| `SYSTEM_ALERT_WINDOW` on the boot helper | free | documented exemption | firmware may be stricter than the docs |
+| **FreeKiosk** as the kiosk app | free | overlay exemption, then foreground launch | its settings page is not designed for a D-pad |
+| **PC watchdog** (Windows scheduled task) | free | launches over adb, as shell | needs a PC left on, on the same LAN |
+| **Projectivy Premium** | $7.49 once | it is the launcher | per Google account, not per device |
+| **Fully Kiosk PLUS** | per device | it is the launcher | pricier across a fleet |
+| **Amazon Signage Stick** | $99 per screen | firmware boots the CMS app | only vetted CMS apps — AbleSign is one |
+
+Rooting or flashing is not on that list on purpose. A system update replaces the
+bootloader with one whose `fastboot` unlock is disabled, so most retail sticks
+are already sealed; there is no LineageOS build for the Full HD (XNA) stick; and
+any Android 12+ ROM keeps BAL anyway. Root would fix it instantly, but only on a
+device you unlocked before it ever updated.
+
+### The Amazon Signage Stick sidesteps all of it
+
+AbleSign is one of the CMS partners built into the Signage Stick's setup flow,
+alongside CastHub, Rise Vision, PosterBooking, Yodeck and NoviSign. The stick
+boots straight into it — no helper app, no launcher takeover, no adb. If you are
+buying hardware for one or two screens, this is cheaper than the time the routes
+above cost. It only auto-launches **vetted CMS apps**, so it is not a general
+answer for arbitrary sideloaded software.
 
 ### Recommended: Fully Kiosk Browser as the player
 
