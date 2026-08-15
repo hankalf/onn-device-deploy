@@ -35,6 +35,9 @@ $script:Bloat = @(
 $script:Gtv    = 'com.google.android.apps.tv.launcherx'
 $script:Wizard = 'com.google.android.tungsten.setupwraith'
 $script:Proj   = 'com.spocky.projengmenu'
+# Launch-On-Boot (ITVlab, MIT-licensed, free on Play + F-Droid): its entire job
+# is starting a chosen app at boot, which is the paid part of every launcher.
+$script:Lob    = 'news.androidtv.launchonboot'
 $script:Fully  = 'de.ozerov.fully'
 $script:FullyApkUrl = 'https://www.fully-kiosk.com/files/2026/08/Fully-Kiosk-Browser-v1.61.1.apk'
 
@@ -79,8 +82,8 @@ $form.Controls.Add($btnConnect)
 $null = New-Label '2. Player' 20 155 200 $true
 $null = New-Label 'AbleSign gets its content from your AbleSign cloud account - nothing to enter here.' 20 178 620 $false
 $rbAble = New-Object Windows.Forms.RadioButton
-$rbAble.Text = 'AbleSign  (tries its own boot receiver first - free if it has one)'
-$rbAble.Location = New-Object Drawing.Point(20, 202); $rbAble.Size = New-Object Drawing.Size(390, 22)
+$rbAble.Text = 'AbleSign  (free routes tried first: own boot receiver, then Launch-On-Boot)'
+$rbAble.Location = New-Object Drawing.Point(20, 202); $rbAble.Size = New-Object Drawing.Size(420, 22)
 $rbAble.Checked = $true
 $form.Controls.Add($rbAble)
 $rbFully = New-Object Windows.Forms.RadioButton
@@ -540,6 +543,7 @@ function Try-StandaloneAutostart($pkg) {
     Info 'Those are the only two ways an Android app can start itself at boot,'
     Info 'so it genuinely cannot do it alone - that is an app limitation, not a'
     Info 'device or tooling one. Something else has to start it. Your options:'
+    Info '  * Launch-On-Boot - FREE, MIT-licensed, does only this one job.'
     Info '  * Projectivy Premium - $7.49 ONCE, covers every box on the same'
     Info '    Google account. Cheapest for a fleet.'
     Info '  * Fully Kiosk PLUS - licensed PER DEVICE, so pricier at scale.'
@@ -669,6 +673,32 @@ function Do-Deploy {
         return
       }
 
+      # Free route first: a tiny open-source helper whose only job is this.
+      if (Pkg-Installed $Lob) {
+        Step 'Launch-On-Boot (free) is installed - using it'
+        Sh "dumpsys deviceidle whitelist +$Lob" | Out-Null
+        Sh "cmd appops set $Lob RUN_IN_BACKGROUND allow" | Out-Null
+        Sh "cmd appops set $Lob RUN_ANY_IN_BACKGROUND allow" | Out-Null
+        Sh "am set-inactive $Lob false" | Out-Null
+        Ok 'its boot restrictions are cleared'
+        Sh "monkey -p $Lob -c android.intent.category.LAUNCHER 1" | Out-Null
+        Warn 'ONE step on the TV, with the remote (first time only):'
+        Info '   Launch-On-Boot is now open - choose ABLESIGN in it.'
+        Info 'Then press "Verify boot" here to confirm. Total cost: $0.'
+        Harden
+        return
+      }
+      if (-not $chkForceProj.Checked) {
+        Step 'Free option available'
+        Info 'Launch-On-Boot is a small MIT-licensed app whose only job is'
+        Info 'starting a chosen app at boot - the exact feature Projectivy'
+        Info 'and Fully Kiosk charge for. It is free on the Play Store.'
+        Info 'Opening its page on the TV - install it, then press DEPLOY again.'
+        Sh "am start -a android.intent.action.VIEW -d market://details?id=$Lob" | Out-Null
+        Info ''
+        Info 'Prefer the paid launcher instead? Tick "Force Projectivy route".'
+        return
+      }
       if (-not (Pkg-Installed $Proj)) {
         Warn 'Projectivy Launcher is needed to start AbleSign at boot.'
         Warn 'HEADS UP: Projectivy is free, but its "launch app at startup"'

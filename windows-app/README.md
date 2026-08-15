@@ -98,7 +98,7 @@ without changing anything.
 |---|---|
 | **Device list / Rescan** | Finds boxes on USB **and** network. onn sticks only answer over the network — the list says so when nothing is found. |
 | **IP + Connect** | Connects over the network; retries stale sessions and explains `unauthorized` (the prompt is on the TV). |
-| **AbleSign** | The default. Tries AbleSign's own boot receiver first (free); falls back to hosting it with Projectivy, whose boot-launch feature is $7.49 Premium. Content comes from the AbleSign cloud — nothing to configure here. |
+| **AbleSign** | The default. Tries AbleSign's own boot receiver, then free Launch-On-Boot, and only then the paid Projectivy route. Content comes from the AbleSign cloud — nothing to configure here. |
 | **Fully Kiosk** | Alternative, for showing a plain URL instead. Kiosk/launcher mode needs a paid PLUS license per device; the app warns first, and asks for the URL only if you pick this. |
 | **Remove all streaming apps** | Strips 22 packages (Netflix, YouTube, Disney+, Apple TV, ESPN, Instagram, assistant, screensavers…), reversibly. |
 | **Disable the Google TV home screen** | Removes the Live/Apps rows so nothing competes for boot — only after the replacement verifies. |
@@ -122,9 +122,13 @@ and every workaround has a price except one:
 | Route | Cost | Notes |
 |---|---|---|
 | **AbleSign's own boot receiver** | **Free** | Only if AbleSign ships one — the app checks and tells you. Nothing else needed. |
-| **Projectivy Premium** | **$7.49 one-time** | Its "launch app at startup" is a Premium feature. The purchase covers **every device on the same Google account**, so it's cheap for a fleet. |
+| **[Launch-On-Boot](https://github.com/ITVlab/Launch-On-Boot)** | **Free** (MIT) | A tiny open-source app whose *only* job is starting a chosen app at boot — exactly the feature the launchers charge for. On the Play Store and F-Droid. The app installs and configures it for you. |
+| **Projectivy Premium** | $7.49 one-time | Its "launch app at startup" is Premium. One purchase covers **every device on the same Google account**. |
 | **Fully Kiosk PLUS** | Paid **per device** | Kiosk/launcher mode is licensed per box — the expensive option at scale. |
 | **Amazon Signage Stick** | Hardware only | Boots into its signage player natively. No launcher tricks, no add-on licence. |
+
+The app tries the free routes **first** and only mentions the paid ones if both
+fail.
 
 ## Does AbleSign need Projectivy?
 
