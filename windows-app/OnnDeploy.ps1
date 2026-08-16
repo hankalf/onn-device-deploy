@@ -623,6 +623,13 @@ function Set-BootTarget($pkg) {
 # restrictions that silently kill one, and reports honestly if neither exists.
 function Try-StandaloneAutostart($pkg) {
   Step "Can $pkg start itself at boot (no launcher)?"
+  if (Is-FireOS) {
+    Ok 'this is a Fire OS box, which changes the odds in your favour'
+    Info 'Fire OS 8 is built on Android 11, where the background-launch rules'
+    Info 'are looser than the Android 12+ ones that beat the Google TV sticks.'
+    Info 'On Fire TV this route alone is the whole documented fix, and it is'
+    Info 'the one setting Fire OS gives you no on-screen way to change.'
+  }
 
   $rx = (Sh 'cmd package query-receivers --brief -a android.intent.action.BOOT_COMPLETED') -split "`n" |
         Where-Object { $_ -match [regex]::Escape($pkg) } | ForEach-Object { $_.Trim() }
@@ -662,12 +669,35 @@ function Try-StandaloneAutostart($pkg) {
   Sh "dumpsys deviceidle whitelist +$pkg" | Out-Null       # ignore Doze
   Sh "cmd appops set $pkg RUN_IN_BACKGROUND allow" | Out-Null
   Sh "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow" | Out-Null
-  Sh "cmd appops set --user 0 $pkg SYSTEM_ALERT_WINDOW allow" | Out-Null
   Sh "am set-inactive $pkg false" | Out-Null               # out of app-standby
   Sh "pm set-app-links --package $pkg 0 all" | Out-Null    # harmless if absent
-  Ok 'battery, background and overlay restrictions cleared'
+  Grant-Overlay $pkg
   Info 'Press "Verify boot" after this to see whether it actually comes up.'
   return $true
+}
+
+function Is-FireOS {
+  return ((Sh "getprop | grep -E 'ro.product.manufacturer|com.amazon'") -match 'Amazon|amazon')
+}
+
+function Grant-Overlay($pkg) {
+  # Draw-over-other-apps is the exemption from the background-launch block, and
+  # it is the whole of every signage vendor's Fire TV guide. Fire OS ships no UI
+  # for it at all, so adb is the only way in on those boxes. Three spellings
+  # because which one takes depends on the OS version, and they are harmless
+  # when they miss.
+  Sh "cmd appops set --user 0 $pkg SYSTEM_ALERT_WINDOW allow" | Out-Null
+  Sh "cmd appops set $pkg SYSTEM_ALERT_WINDOW allow" | Out-Null
+  Sh "pm grant $pkg android.permission.SYSTEM_ALERT_WINDOW" | Out-Null
+  if ((Sh "cmd appops get $pkg SYSTEM_ALERT_WINDOW") -match 'allow') {
+    Ok 'battery, background and overlay restrictions cleared'
+    Ok 'draw-over-other-apps granted - the documented exemption from the'
+    Ok 'background-launch block, and the standard Fire TV signage fix'
+    return $true
+  }
+  Warn 'battery and background cleared, but draw-over-other-apps did not take.'
+  Warn 'Without it a boot launch is likely to be refused on Android 12+.'
+  return $false
 }
 
 # ------------------------------------------------------- boot-route memory ---
@@ -913,16 +943,7 @@ function Route-FK {
   Ok "installed: $FK"
 
   # This is the whole reason the route can work where Launch-On-Boot did not.
-  Sh "cmd appops set $FK SYSTEM_ALERT_WINDOW allow" | Out-Null
-  Sh "appops set $FK SYSTEM_ALERT_WINDOW allow" | Out-Null
-  $sawOn = ((Sh "cmd appops get $FK SYSTEM_ALERT_WINDOW") -match 'allow')
-  if ($sawOn) {
-    Ok 'granted draw-over-other-apps - the documented exemption from the'
-    Ok 'background-launch block that stopped the last route'
-  } else {
-    Warn 'could not grant draw-over-other-apps. This route may hit the same'
-    Warn 'block; if it does, the PC watchdog is the fallback that always works.'
-  }
+  Grant-Overlay $FK | Out-Null
   Sh "dumpsys deviceidle whitelist +$FK" | Out-Null
   Sh "cmd appops set $FK RUN_IN_BACKGROUND allow" | Out-Null
   Sh "cmd appops set $FK RUN_ANY_IN_BACKGROUND allow" | Out-Null
@@ -987,16 +1008,7 @@ function Route-Lob {
   # SOMETHING ON SCREEN at boot. Android 12+ blocks the second unless the
   # caller is exempt, and holding SYSTEM_ALERT_WINDOW is one of the few
   # exemptions grantable from here. Worth the one line; not a guaranteed cure.
-  Sh "cmd appops set $Lob SYSTEM_ALERT_WINDOW allow" | Out-Null
-  Sh "appops set $Lob SYSTEM_ALERT_WINDOW allow" | Out-Null
-  $sawOn = ((Sh "cmd appops get $Lob SYSTEM_ALERT_WINDOW") -match 'allow')
-  if ($sawOn) {
-    Ok 'granted it draw-over-other-apps, which exempts it from the'
-    Ok 'background-launch block that stops most boot helpers on Android 12+'
-  } else {
-    Warn 'could not grant it draw-over-other-apps. If this route comes back with'
-    Warn '"Background activity launch blocked", use the PC watchdog instead.'
-  }
+  Grant-Overlay $Lob | Out-Null
   Sh "monkey -p $Lob -c android.intent.category.LAUNCHER 1" | Out-Null
   Set-Attempted 'lob'
   Harden
