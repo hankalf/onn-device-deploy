@@ -484,6 +484,14 @@ function Show-ConnectHelp {
   Info 'only). Network is the supported route. PC and box must be on the same'
   Info 'network - business Wi-Fi often blocks device-to-device traffic, and a'
   Info 'phone hotspot is a quick way around that.'
+  Info ''
+  Warn 'On a Fire TV, check the model number before spending time on this.'
+  Info 'Amazon replaced Android with Vega OS, which is Linux and has no adb and'
+  Info 'no sideloading at all - nothing here can reach those, and no setting'
+  Info 'turns it back on. Vega so far: Fire TV Stick 4K Select (CL32P4) and the'
+  Info 'Fire TV Stick HD released April 2026, and Amazon says every new Fire TV'
+  Info 'Stick from now on. Still Android, so still fine: Fire TV Stick 4K Max,'
+  Info 'Fire TV Stick 4K (2023), Fire TV Cube, and the Amazon Signage Stick.'
 }
 
 function Home-List { (Sh 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME') -split "`n" | Where-Object { $_ -match '/' } | ForEach-Object { $_.Trim() } }

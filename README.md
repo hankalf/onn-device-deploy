@@ -185,6 +185,29 @@ are already sealed; there is no LineageOS build for the Full HD (XNA) stick; and
 any Android 12+ ROM keeps BAL anyway. Root would fix it instantly, but only on a
 device you unlocked before it ever updated.
 
+### Check the model before buying any Fire TV
+
+Fire OS 8 is Android 11, whose background-launch rules are looser than the
+Android 12+ ones above — so on an Android-based Fire TV the overlay grant alone
+is the whole documented fix, and every signage vendor publishes it as such.
+
+But **Amazon has started replacing Android with Vega OS**, which is Linux-based
+and supports no sideloading and no adb by any method. Nothing in this repo can
+reach a Vega device, and no setting turns it back on.
+
+| Fire TV device | OS | Works with this repo |
+|---|---|---|
+| Fire TV Stick 4K Select (**CL32P4**) | Vega | no — no adb, no sideloading |
+| Fire TV Stick HD (April 2026) | Vega | no |
+| Fire TV Stick 4K Max | Fire OS 8 (Android 11) | yes |
+| Fire TV Stick 4K (2023) | Fire OS 8 (Android 11) | yes |
+| Fire TV Cube | Fire OS (Android) | yes |
+| Amazon Signage Stick | Fire OS (Android) | yes, and needs none of it |
+
+Amazon has said all future Fire TV Sticks run Vega, so "buy a new Firestick" is
+no longer a safe instruction — buy a specific Android model, or buy the Signage
+Stick.
+
 ### The Amazon Signage Stick sidesteps all of it
 
 AbleSign is one of the CMS partners built into the Signage Stick's setup flow,
